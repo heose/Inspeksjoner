@@ -83,7 +83,7 @@ const TEMPLATES = [
     ],
   },
   {
-    id: 'sprinkel_vk', name: 'Brann og sprinkeltest VK', site: 'Vekterkvartalet – Teknisk', months: 1,
+    id: 'sprinkel_vk', name: 'Brann og sprinkeltest VK/SVK', site: 'Vekterkvartalet – Teknisk', months: 1,
     sections: [
       { id: 'forberedelse', title: 'Før testen', items: [
         inf('lokal', 'Husk å vri om nøkkel på gul boks ved lokal test. Ved lokal test skal GUL lampe på testboks lyse og GRØNN lampe indikerer vellykket test. Turbinklokke skal være uten lekkasje. Hovedventil skal være låst, men mulighet for å åpnes uten nøkkel (strips, lenke etc.).'),
@@ -91,8 +91,8 @@ const TEMPLATES = [
       ] },
       { id: 'sted', title: 'Hvilket sted', items: [mul('hvor', 'Hvor testes det?', ['Næring', 'Leiligheter trinn 1-3', 'Leiligheter trinn 4'])] },
       { id: 'naering', title: 'Næring', showIf: { item: 'sted.hvor', includes: 'Næring' }, items: [...vkBase(true), ...vkTail()] },
-      { id: 'leil13', title: 'Leiligheter trinn 1-3', showIf: { item: 'sted.hvor', includes: 'Leiligheter trinn 1-3' }, items: [...vkBase(false), ...vkTail()] },
-      { id: 'leil4', title: 'Leiligheter trinn 4', showIf: { item: 'sted.hvor', includes: 'Leiligheter trinn 4' }, items: [
+      { id: 'leil13', tl: 'svk', title: 'SVK bolig trinn 1-3', showIf: { item: 'sted.hvor', includes: 'Leiligheter trinn 1-3' }, items: [...vkBase(false), ...vkTail()] },
+      { id: 'leil4', tl: 'svk', title: 'SVK bolig trinn 4', showIf: { item: 'sted.hvor', includes: 'Leiligheter trinn 4' }, items: [
         ...vkBase(false),
         hd('h_varme', 'Varmekabel sprinkler'),
         yn('sept_april', 'Er måneden i perioden sept–april?', { flag: [], neutral: true, auto: 'septApril' }),
@@ -146,7 +146,7 @@ const TEMPLATES = [
       { id: 'sprinkler', title: 'Sprinkleranlegg', items: [ok('summer', 'Er summer koblet ut før test?')] },
       { id: 'sted', title: 'Hvilket sted', items: [mul('hvor', 'Hvor testes det?', ['Næring ny del', 'Leiligheter ny del', 'Næring gammel del'])] },
       { id: 'naering_ny', title: 'Næring ny del', showIf: { item: 'sted.hvor', includes: 'Næring ny del' }, items: [...vkBase(true), ...nokkelBlock(), ...alarmBlock()] },
-      { id: 'leil_ny', title: 'Leiligheter ny del', showIf: { item: 'sted.hvor', includes: 'Leiligheter ny del' }, items: [...vkBase(false), ...nokkelBlock(), ...alarmBlock()] },
+      { id: 'leil_ny', title: 'Bolig', showIf: { item: 'sted.hvor', includes: 'Leiligheter ny del' }, items: [...vkBase(false), ...nokkelBlock(), ...alarmBlock()] },
       { id: 'naering_gml', title: 'Næring gammel del', showIf: { item: 'sted.hvor', includes: 'Næring gammel del' }, items: [...vkBase(true)] },
     ],
   },
@@ -262,12 +262,89 @@ const TEMPLATES = [
     ],
   },
 ];
-const ORDER = ['internkontroll', 'sprinkel_op', 'kloakk', 'op_ukentlig', 'sprinkel_vk', 'vk_ukentlig', 'vernerunde', 'vernerunde_halvar', 'sprinkel_tb'];
+TEMPLATES.push({
+  id: 'halvar_op', name: 'Halvårlig servicesjekk OP', site: 'Olsrød Park – Teknisk', months: 6,
+  sections: [
+    { id: 'heis1', title: 'Heis 1', items: svc('s', { help: 'Sjekk serviceboka/loggen i maskinrom eller heisstol.' }) },
+    { id: 'heis2', title: 'Heis 2', items: svc('s', { help: 'Sjekk serviceboka/loggen i maskinrom eller heisstol.' }) },
+    { id: 'rulle', title: 'Rulletrapp', items: svc('s', { dato: 'Dato for siste kontroll' }) },
+  ],
+});
+const ORDER = ['internkontroll', 'sprinkel_op', 'kloakk', 'op_ukentlig', 'halvar_op', 'sprinkel_vk', 'vk_ukentlig', 'vernerunde', 'vernerunde_halvar', 'sprinkel_tb'];
 TEMPLATES.sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
 const TRELLO = { board: '69fd92b5f73c4c4645f0a9b2', lists: { olsrod: '69fd92efa0fbbbd4a10fc0ee', vk: '69fd92f5a4757aaa7dcfef02', svk: '6ae5a990f8db6f1ba0c7970f', tb: '6ae5a995305871414c09e581' } };
-const TLIST = { internkontroll: 'olsrod', sprinkel_op: 'olsrod', kloakk: 'olsrod', op_ukentlig: 'olsrod', sprinkel_vk: 'vk', vk_ukentlig: 'vk', vernerunde_halvar: 'vk', vernerunde: 'svk', sprinkel_tb: 'tb' };
+const TLIST = { internkontroll: 'olsrod', sprinkel_op: 'olsrod', kloakk: 'olsrod', op_ukentlig: 'olsrod', halvar_op: 'olsrod', sprinkel_vk: 'vk', vk_ukentlig: 'vk', vernerunde_halvar: 'vk', vernerunde: 'svk', sprinkel_tb: 'tb' };
 TEMPLATES.forEach(t => { t.tl = TLIST[t.id]; });
 const TPL = Object.fromEntries(TEMPLATES.map(t => [t.id, t]));
+/* ---------- Anleggsregister ----------
+   Hvert anlegg peker på punktene i sjekklistene som kontrollerer det: [mal, [nøkler]].
+   En nøkkel er 'seksjon' (hele seksjonen) eller 'seksjon.punkt'. Tillegg: x = punkter som ikke teller,
+   w = bare instanser der et svar er lik en verdi (kloakkum). */
+const SITES = [
+  { id: 'op', name: 'Olsrød Park', short: 'OP', tpls: ['op_ukentlig', 'internkontroll', 'sprinkel_op', 'kloakk', 'halvar_op'] },
+  { id: 'vk', name: 'Vekterkvartalet', short: 'VK', tpls: ['vk_ukentlig', 'sprinkel_vk', 'vernerunde_halvar'] },
+  { id: 'svk', name: 'Sameiet VK', short: 'SVK', tpls: ['sprinkel_vk', 'vernerunde'] },
+  { id: 'tb', name: 'Tollbodgata 14', short: 'TB', tpls: ['sprinkel_tb'] },
+];
+const ALARM = ['h_nokkel', 'nokler', 'h_alarm', 'alarminfo', 'sentral', 'overforing'];
+const sv = (sec, p) => ['_ok', '_lev', '_dato'].map(x => sec + '.' + p + x);
+const R = (...ids) => ids.map(i => 'runde.' + i);
+const ANLEGG = [
+  ['op', 'op_brann', 'Brannalarmanlegg', 'Brannsentral, alarmoverføring og nøkkelboks', [['op_ukentlig', R('branntavle')], ['internkontroll', ['brann']], ['sprinkel_op', ['naering_ny', 'leil_ny'].flatMap(s => ALARM.map(i => s + '.' + i))]]],
+  ['op', 'op_spr_ny', 'Sprinkleranlegg – næring ny del', '', [['sprinkel_op', ['sprinkler', 'naering_ny'], { x: ALARM }], ['op_ukentlig', R('sprinklerrom')], ['internkontroll', ['sprinkler']]]],
+  ['op', 'op_spr_bolig', 'Sprinkleranlegg – bolig', '', [['sprinkel_op', ['leil_ny'], { x: ALARM }]]],
+  ['op', 'op_spr_gml', 'Sprinkleranlegg – næring gammel del', '', [['sprinkel_op', ['naering_gml']]]],
+  ['op', 'op_nodlys', 'Nød- og ledelys', 'Årskontroll: Xpert installasjon', [['op_ukentlig', R('nodlys')], ['internkontroll', ['ledelys']]]],
+  ['op', 'op_romning', 'Rømningsveier', '', [['internkontroll', ['romning']]]],
+  ['op', 'op_slokke', 'Håndslokkeapparater', '', [['internkontroll', ['slokke']]]],
+  ['op', 'op_slanger', 'Brannslanger', '', [['internkontroll', ['slanger']]]],
+  ['op', 'op_royk', 'Røykventilasjon og branngardiner', '', [['internkontroll', ['royk']]]],
+  ['op', 'op_dorer', 'Branndører og porter', '', [['internkontroll', ['dorer']]]],
+  ['op', 'op_kloakk_gml', 'Kloakkum og pumper – gammel del', '', [['kloakk', ['kum'], { w: ['sted', 'Gammel del'] }]]],
+  ['op', 'op_kloakk_level', 'Kloakkum og pumper – Level', '', [['kloakk', ['kum'], { w: ['sted', 'Level'] }]]],
+  ['op', 'op_vent', 'Ventilasjon', '', [['op_ukentlig', R('vent')]]],
+  ['op', 'op_varme', 'Varmeanlegg', 'Glykolkurs og trykkvann', [['op_ukentlig', R('glykol')]]],
+  ['op', 'op_menerga', 'Menerga-anlegg', '', [['op_ukentlig', R('menerga')]]],
+  ['op', 'op_el', 'El-tavler og sikringer', '', [['op_ukentlig', R('sikringer')]]],
+  ['op', 'op_lys', 'Belysning inne og ute', '', [['op_ukentlig', R('innelys', 'utelys')]]],
+  ['op', 'op_kamera', 'Kameraovervåking', '', [['op_ukentlig', R('kamera')]]],
+  ['op', 'op_heis1', 'Heis 1', '', [['halvar_op', ['heis1']]]],
+  ['op', 'op_heis2', 'Heis 2', '', [['halvar_op', ['heis2']]]],
+  ['op', 'op_rulle', 'Rulletrapp', '', [['halvar_op', ['rulle']]]],
+  ['op', 'op_bygg', 'Bygg, uteområde og varemottak', '', [['op_ukentlig', R('varemottak', 'uteomrade', 'skader', 'andre')], ['internkontroll', ['endringer']]]],
+
+  ['vk', 'vk_brann', 'Brannalarmanlegg', 'Brannsentral, alarmoverføring og nøkkelboks', [['vk_ukentlig', R('branntavle')], ['sprinkel_vk', ['innkobling', ...['naering', 'leil13', 'leil4'].flatMap(s => ALARM.map(i => s + '.' + i))]]]],
+  ['vk', 'vk_spr', 'Sprinkleranlegg – næring', '', [['sprinkel_vk', ['naering'], { x: ALARM }], ['vk_ukentlig', R('sprinklerrom')], ['vernerunde_halvar', ['spr_ok1', 'spr_lev', 'spr_dato', 'spr_ok2', 'spr_kontrollor', 'spr_dato2', 'spr_egen', 'spr_logg'].map(i => 'brannvern.' + i)]]],
+  ['vk', 'vk_nodlys', 'Nød- og ledelys', '', [['vk_ukentlig', R('nodlys')], ['vernerunde_halvar', ['brannvern.nodlys_ok1', ...sv('brannvern', 'nodlys'), 'brannvern.nodlys_egen', 'brannvern.nodlys_egendato']]]],
+  ['vk', 'vk_vent', 'Ventilasjon', '36.06, 36.08–36.13', [['vk_ukentlig', R('vent1', 'vent2', 'vent3')], ['vernerunde_halvar', sv('elektro', 'vent')]]],
+  ['vk', 'vk_el', 'El-tavler og sikringer', '', [['vk_ukentlig', R('sikringer')], ['vernerunde_halvar', sv('elektro', 'tavler')]]],
+  ['vk', 'vk_rulle', 'Rulletrapp', '', [['vernerunde_halvar', sv('teknisk', 'rulle')]]],
+  ['vk', 'vk_heis', 'Heis', '', [['vernerunde_halvar', sv('teknisk', 'heis')]]],
+  ['vk', 'vk_slokk', 'Håndslukkere og brannslanger', 'Med frostvakter', [['vernerunde_halvar', sv('brannvern', 'slokk')]]],
+  ['vk', 'vk_dorer', 'Branndører og rømningsveier', '', [['vernerunde_halvar', ['brannvern.dorer_ok']]]],
+  ['vk', 'vk_merk', 'Brannmerking og branninstrukser', '', [['vernerunde_halvar', ['brannvern.merk_ok', 'brannvern.ovelse_dato']]]],
+  ['vk', 'vk_hjerte', 'Hjertestarter', '', [['vernerunde_halvar', ['brannvern.hjerte_ok', 'brannvern.batteri', 'brannvern.pads']]]],
+  ['vk', 'vk_vvs', 'VVS og taksluk', '', [['vernerunde_halvar', ['diverse.vvs_ok']]]],
+  ['vk', 'vk_lys', 'Belysning inne og ute', '', [['vk_ukentlig', R('innelys', 'utelys')]]],
+  ['vk', 'vk_kamera', 'Kameraovervåking', '', [['vk_ukentlig', R('kamera')]]],
+  ['vk', 'vk_bygg', 'Bygg, uteområde og kildesortering', '', [['vk_ukentlig', R('varemottak', 'uteomrade', 'skader', 'andre')], ['vernerunde_halvar', ['diverse'], { x: ['h_vvs', 'vvs_info', 'vvs_ok'] }]]],
+
+  ['svk', 'svk_spr13', 'Sprinkleranlegg – bolig trinn 1–3', '', [['sprinkel_vk', ['leil13'], { x: ALARM }]]],
+  ['svk', 'svk_spr4', 'Sprinkleranlegg – bolig trinn 4', 'Med varmekabel VK1/VK2', [['sprinkel_vk', ['leil4'], { x: ALARM }]]],
+  ['svk', 'svk_nodlys', 'Nødlys', '', [['vernerunde', ['nodlys']]]],
+  ['svk', 'svk_el', 'El-tavler og sikringsskap', '', [['vernerunde', ['elektro']]]],
+  ['svk', 'svk_slokk', 'Håndslukkere og brannslanger', 'Med frostvakter', [['vernerunde', ['slukke']]]],
+  ['svk', 'svk_romning', 'Rømningsveier', '', [['vernerunde', ['romning']]]],
+  ['svk', 'svk_hjerte', 'Hjertestarter', '', [['vernerunde', ['hjerte']]]],
+  ['svk', 'svk_bygg', 'Bygg, orden og kildesortering', '', [['vernerunde', ['andre']]]],
+
+  ['tb', 'tb_vat', 'Sprinkleranlegg – våtventil', '', [['sprinkel_tb', ['sprinkler', 'vatventil']]]],
+  ['tb', 'tb_torr', 'Sprinkleranlegg – tørrventil', 'Med kompressor', [['sprinkel_tb', ['torrventil', 'kompressor']]]],
+  ['tb', 'tb_brann', 'Brannalarmanlegg', 'Brannsentral Røde Kors, branntavle leiligheter, alarmoverføring, nøkkelboks', [['sprinkel_tb', ['alarmtavle', 'brannsentral', 'nokkelboks']]]],
+  ['tb', 'tb_nodlys', 'Nødlys', '', [['sprinkel_tb', ['nodlys']]]],
+].map(([site, id, name, note, cov]) => ({ site, id, name, note, cov: cov.map(([t, k, o = {}]) => ({ t, k, x: o.x || [], w: o.w })) }));
+const ANL = Object.fromEntries(ANLEGG.map(a => [a.id, a]));
+
 const TYPES = {
   ok:  { opts: ['Ok', 'Ikke OK', 'N/A'], flag: ['Ikke OK'] },
   okm: { opts: ['Ok', 'Ikke OK', 'Merknad', 'N/A'], flag: ['Ikke OK'] },
@@ -278,7 +355,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-10-31 f';
+const APP_VERSION = '2026-10-31 g';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -427,6 +504,57 @@ function dueInfo(t, last) {
   if (d <= (t.days ? 2 : 7)) return { cls: 'warn', text: 'Forfaller ' + fmt(next) };
   return { cls: 'ok', text: 'Neste ' + fmt(next) };
 }
+function covMatch(c, key, ins) {
+  const dot = key.indexOf('.'), p = key.slice(0, dot), id = key.slice(dot + 1), sec = p.split('#')[0];
+  if (c.x.includes(id)) return false;
+  if (!c.k.some(k => k === sec || k === sec + '.' + id)) return false;
+  if (c.w && ins.answers[p + '.' + c.w[0]]?.value !== c.w[1]) return false;
+  return true;
+}
+function covItems(c, ins) {
+  const t = TPL[c.t], out = [];
+  for (const x of walk(t, ins)) if (x.it.type !== 'heading' && x.it.type !== 'info' && covMatch(c, x.key, ins)) out.push(x);
+  return out;
+}
+const answered = a => a && a.value != null && a.value !== '' && !(Array.isArray(a.value) && !a.value.length);
+const unresolved = a => !(a.actions || []).length || a.actions.some(z => !z.done);
+let anlCache = null;
+function anlState(a) {
+  anlCache ||= {};
+  if (anlCache[a.id]) return anlCache[a.id];
+  const all = Object.values(S.ins);
+  const done = all.filter(i => i.status === 'complete').sort((x, y) => (y.date || '').localeCompare(x.date || '') || y.updatedAt - x.updatedAt);
+  const covs = [], hist = [], open = [];
+  for (const c of a.cov) {
+    const t = TPL[c.t]; let last = null, lastFlags = [];
+    for (const i of done) {
+      if (i.templateId !== c.t) continue;
+      const items = covItems(c, i).filter(x => answered(i.answers[x.key]) || (i.answers[x.key]?.actions || []).length);
+      if (!items.length) continue;
+      const flags = items.filter(x => isFlag(x.it, i.answers[x.key]));
+      hist.push({ i, t, n: items.length, flags });
+      if (!last) { last = i; lastFlags = flags.filter(x => unresolved(i.answers[x.key])); }
+    }
+    for (const i of all) if (i.templateId === c.t) for (const [key, ans] of Object.entries(i.answers))
+      for (const act of ans.actions || []) if (!act.done && covMatch(c, key, i)) open.push({ i, key, act });
+    const next = last ? (t.days ? addDays(last.date, t.days) : addMonths(last.date, t.months)) : null;
+    covs.push({ c, t, last, flags: lastFlags, next, d: next ? daysBetween(todayISO(), next) : null, draft: all.find(i => i.templateId === c.t && i.status !== 'complete') });
+  }
+  hist.sort((x, y) => (y.i.date || '').localeCompare(x.i.date || ''));
+  const dated = covs.filter(x => x.next).sort((x, y) => x.next.localeCompare(y.next));
+  const nextDue = dated[0]?.next || null;
+  const overdue = dated.find(x => x.d < 0);
+  const soon = dated.find(x => x.d <= (x.t.days ? 2 : 7));
+  const nflag = covs.reduce((n, x) => n + x.flags.length, 0);
+  let cls, text;
+  if (!dated.length) { cls = 'na'; text = 'Ikke kontrollert i Argus ennå'; }
+  else if (open.length || nflag) { cls = 'bad'; text = [open.length ? open.length + (open.length === 1 ? ' åpen handling' : ' åpne handlinger') : '', nflag ? nflag + ' avvik' : ''].filter(Boolean).join(' · '); }
+  else if (overdue) { cls = 'bad'; text = 'Forfalt ' + fmt(overdue.next); }
+  else if (soon) { cls = 'warn'; text = 'Forfaller ' + fmt(soon.next); }
+  else { cls = 'ok'; text = 'Neste ' + fmt(nextDue); }
+  if (cls === 'bad' && overdue && (open.length || nflag)) text += ' · forfalt';
+  return (anlCache[a.id] = { covs, hist, open, nextDue, cls, text });
+}
 const A = (ins, key) => (ins.answers[key] ||= {});
 const cur = () => S.ins[S.cur];
 
@@ -445,8 +573,9 @@ function newInspection(tid) {
   S.ins[ins.id] = ins; flush(ins.id);
   openIns(ins.id);
 }
+function openAnl(id) { S.anl = id; S.view = 'anl'; S.cur = null; render(); window.scrollTo(0, 0); }
 function openIns(id) { S.cur = id; S.view = 'ins'; S.confirmFinish = false; render(); window.scrollTo(0, 0); }
-function goHome() { flushAll(); syncTrello(); S.view = 'home'; S.cur = null; render(); window.scrollTo(0, 0); }
+function goHome(root) { flushAll(); syncTrello(); if (root) S.anl = null; S.cur = null; S.view = S.anl ? 'anl' : 'home'; render(); window.scrollTo(0, 0); }
 
 /* ---------- Visning ---------- */
 const app = $('#app');
@@ -455,10 +584,14 @@ let toastTimer;
 function toast(t, ms = 2600) { const el = $('#toast'); el.textContent = t; el.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, ms); }
 
 function render() {
+  anlCache = null;
   const bar = $('#topbar');
-  if (S.view === 'ins' && cur()) {
+  if (S.view === 'anl' && ANL[S.anl] && S.ready) {
+    bar.innerHTML = `<button class="back" data-act="home-root" aria-label="Tilbake til oversikten">‹ Oversikt</button><div class="bar-title">${esc(ANL[S.anl].name)}</div><div class="bar-status"></div>`;
+    app.innerHTML = renderAnl();
+  } else if (S.view === 'ins' && cur()) {
     const t = TPL[cur().templateId];
-    bar.innerHTML = `<button class="back" data-act="home" aria-label="Tilbake til oversikten">‹ Oversikt</button><div class="bar-title">${esc(t.name)}</div><div class="bar-status" id="save-status">Lagret</div>`;
+    bar.innerHTML = `<button class="back" data-act="home" aria-label="Tilbake">‹ ${S.anl && ANL[S.anl] ? 'Anlegg' : 'Oversikt'}</button><div class="bar-title">${esc(t.name)}</div><div class="bar-status" id="save-status">Lagret</div>`;
     app.innerHTML = renderIns();
   } else {
     bar.innerHTML = `<div class="brand"><span class="brand-name">Argus</span><span class="brand-co">${esc(S.settings.company)}</span></div><button class="ghost-sm" data-act="settings">${S.showSettings ? 'Lukk' : 'Innstillinger'}</button>`;
@@ -507,15 +640,6 @@ function renderHome() {
     </section>`;
   }
 
-  h += `<section><h2 class="h2">Start inspeksjon</h2><div class="tpl-list">${TEMPLATES.map(t => {
-    const last = done.find(i => i.templateId === t.id); const due = dueInfo(t, last);
-    return `<button class="tpl" data-act="new" data-tpl="${t.id}">
-      <span class="tpl-top"><span class="tpl-name">${esc(t.name)}</span><span class="freq">${freqLabel(t)}</span></span>
-      <span class="tpl-site">${esc(t.site)}</span>
-      <span class="tpl-meta"><span class="pill ${due.cls}">${due.text}</span>${last ? `<span class="muted small">Sist ${fmt(last.date)}</span>` : ''}</span>
-    </button>`;
-  }).join('')}</div></section>`;
-
   if (drafts.length) {
     h += `<section><h2 class="h2">Pågår</h2><div class="list">${drafts.map(i => {
       const st = stats(i); const t = TPL[i.templateId];
@@ -524,6 +648,27 @@ function renderHome() {
         <span class="rc-sub">${st.total - st.unanswered} av ${st.total} besvart${st.flags ? ` · <b class="t-bad">${st.flags} avvik</b>` : ''}</span></button>
         <button class="link danger" data-act="del-ins" data-id="${i.id}">Slett</button></div>`;
     }).join('')}</div></section>`;
+  }
+
+  const tplBtn = t => {
+    const last = done.find(i => i.templateId === t.id); const due = dueInfo(t, last);
+    return `<button class="tpl" data-act="new" data-tpl="${t.id}">
+      <span class="tpl-top"><span class="tpl-name">${esc(t.name)}</span><span class="freq">${freqLabel(t)}</span></span>
+      <span class="tpl-meta"><span class="pill ${due.cls}">${due.text}</span>${last ? `<span class="muted small">Sist ${fmt(last.date)}</span>` : ''}</span>
+    </button>`;
+  };
+  const anlBtn = (a, st) => `<button class="anl" data-act="anl" data-id="${a.id}"><span class="dot ${st.cls}" aria-hidden="true"></span>
+    <span class="anl-txt"><span class="rc-title">${esc(a.name)}</span><span class="rc-sub ${st.cls === 'bad' ? 't-bad' : ''}">${esc(st.text)}</span></span><span class="chev" aria-hidden="true">›</span></button>`;
+  const rank = { bad: 0, warn: 1, ok: 2, na: 3 };
+  for (const site of SITES) {
+    const list = ANLEGG.filter(a => a.site === site.id).map(a => ({ a, st: anlState(a) }));
+    const hot = list.filter(x => x.st.cls === 'bad' || x.st.cls === 'warn').sort((x, y) => rank[x.st.cls] - rank[y.st.cls]);
+    const nbad = list.filter(x => x.st.cls === 'bad').length;
+    h += `<section class="site"><h2 class="h2">${esc(site.name)} <span class="count">${site.short}</span></h2>
+      <div class="tpl-list">${site.tpls.map(id => tplBtn(TPL[id])).join('')}</div>
+      ${hot.length ? `<div class="list">${hot.map(x => anlBtn(x.a, x.st)).join('')}</div>` : ''}
+      <details class="anl-all"><summary>Alle anlegg (${list.length})${nbad ? ` · <span class="t-bad">${nbad} med avvik eller forfalt</span>` : ''}</summary>
+        <div class="list">${list.map(x => anlBtn(x.a, x.st)).join('')}</div></details></section>`;
   }
 
   const open = [];
@@ -549,6 +694,36 @@ function renderHome() {
       <span class="rc-sub">${st.flags ? `<b class="t-bad">${st.flags} avvik</b>` : 'Ingen avvik'} · ${st.actions} handlinger</span></button>
       <button class="link" data-act="pdf" data-id="${i.id}">PDF</button><button class="link danger" data-act="del-ins" data-id="${i.id}">Slett</button></div>`;
   }).join('')}</div>${done.length > 8 && !S.showAllHist ? `<button class="link more" data-act="hist-all">Vis alle ${done.length}</button>` : ''}` : '<p class="empty">Fullførte inspeksjoner havner her.</p>';
+  h += '</section>';
+  return h;
+}
+
+function renderAnl() {
+  const a = ANL[S.anl], st = anlState(a), site = SITES.find(x => x.id === a.site);
+  let h = `<section class="panel meta"><h1 class="ins-title">${esc(a.name)}</h1>
+    <p class="muted">${esc(site.name)}${a.note ? ' · ' + esc(a.note) : ''}</p>
+    <p><span class="pill ${st.cls}">${esc(st.text)}</span></p></section>`;
+  h += `<section><h2 class="h2">Kontroller</h2><div class="list">${st.covs.map(x => {
+    const due = dueInfo(x.t, x.last);
+    return `<div class="panel cov"><div class="tpl-top"><span class="tpl-name">${esc(x.t.name)}</span><span class="freq">${freqLabel(x.t)}</span></div>
+      <div class="tpl-meta"><span class="pill ${due.cls}">${due.text}</span>${x.last ? `<span class="muted small">Sist ${fmt(x.last.date)}</span>` : ''}</div>
+      ${x.flags.length ? `<ul class="flags">${x.flags.map(f => `<li><button class="link" data-act="open" data-id="${x.last.id}" data-focus="${esc(f.key)}">${esc(f.it.label)}: <b class="t-bad">${esc(String(x.last.answers[f.key].value))}</b></button></li>`).join('')}</ul>` : ''}
+      ${x.draft ? `<button class="btn" data-act="open" data-id="${x.draft.id}">Fortsett påbegynt (${fmt(x.draft.date)})</button>` : `<button class="btn primary" data-act="new" data-tpl="${x.t.id}">Start kontroll</button>`}</div>`;
+  }).join('')}</div></section>`;
+  h += `<section><h2 class="h2">Åpne handlinger <span class="count">${st.open.length}</span></h2>`;
+  h += st.open.length ? `<div class="list">${st.open.sort((x, y) => (x.act.due || '9').localeCompare(y.act.due || '9')).map(({ i, key, act }) => {
+    const t = TPL[i.templateId]; const late = act.due && act.due < todayISO();
+    return `<div class="act-line"><input type="checkbox" id="hd-${act.id}" data-hdone="${i.id}|${esc(key)}|${act.id}" aria-label="Merk som utført">
+      <button class="row-main" data-act="open" data-id="${i.id}" data-focus="${esc(key)}">
+      <span class="rc-title">${esc(act.text || '(uten beskrivelse)')}</span>
+      <span class="rc-sub">${esc(t.name)} · ${fmt(i.date)}${act.due ? ` · <span class="${late ? 't-bad' : ''}">Frist ${fmt(act.due)}</span>` : ''}</span></button></div>`;
+  }).join('')}</div>` : '<p class="empty">Ingen åpne handlinger.</p>';
+  h += '</section>';
+  h += `<section><h2 class="h2">Historikk</h2>`;
+  h += st.hist.length ? `<div class="list">${st.hist.slice(0, 30).map(({ i, t, n, flags }) => `<div class="row-card"><button class="row-main" data-act="open" data-id="${i.id}">
+      <span class="rc-title">${fmt(i.date)} · ${esc(t.name)}</span>
+      <span class="rc-sub">${flags.length ? `<b class="t-bad">${flags.length} avvik</b>: ${esc(flags.map(f => f.it.label).join('; ').slice(0, 140))}` : `${n} punkter, ingen avvik`}</span></button>
+      <button class="link" data-act="pdf" data-id="${i.id}">PDF</button></div>`).join('')}</div>` : '<p class="empty">Ingen fullførte kontroller av dette anlegget ennå.</p>';
   h += '</section>';
   return h;
 }
@@ -682,6 +857,8 @@ document.addEventListener('click', async e => {
   const act = b.dataset.act, key = b.dataset.key, ins = cur();
   switch (act) {
     case 'home': goHome(); break;
+    case 'home-root': goHome(true); break;
+    case 'anl': openAnl(b.dataset.id); break;
     case 'settings': S.showSettings = !S.showSettings; render(); break;
     case 'new': newInspection(b.dataset.tpl); break;
     case 'open': openIns(b.dataset.id); if (b.dataset.focus) { const el = document.getElementById('it-' + b.dataset.focus); if (el) el.scrollIntoView({ block: 'center' }); } break;
@@ -1146,9 +1323,11 @@ async function syncTrello(manual) {
   try {
     for (const ins of Object.values(S.ins)) {
       if (ins.status !== 'complete') continue;
-      const tpl = TPL[ins.templateId], listId = TRELLO.lists[tpl && tpl.tl]; if (!listId) continue;
+      const tpl = TPL[ins.templateId]; if (!tpl) continue;
       for (const [key, a] of Object.entries(ins.answers)) for (const act of a.actions || []) {
-        if (!act.trello) { if (!(act.text || '').trim()) continue; await sendCard(ins, tpl, key, a, act, listId); sent++; }
+        const listId = TRELLO.lists[findItem(tpl, key).sec?.tl || tpl.tl];
+        if (!act.trello) { if (!listId || !(act.text || '').trim()) continue; await sendCard(ins, tpl, key, a, act, listId); sent++; }
+        if (!act.trello) continue;
         if (act.trello.pics < (a.photos || []).length) await sendPhotos(ins, a, act);
         if (!!act.done !== !!act.trello.done) {
           if (act.due) await tfetch('PUT', `cards/${act.trello.id}`, { dueComplete: act.done ? 'true' : 'false' });
