@@ -43,6 +43,12 @@ const uke = o => [
   txt('andre', 'Andre observasjoner som ikke passer inn i kategoriene over', { suggestOn: 'any', help: 'Ta bilde og opprett handling.' }),
   yn('skjema', 'Er det noe annet som bør legges til i dette skjemaet?', { flag: [], neutral: true }),
 ];
+const kum = () => [
+  ok('tilstand', 'Generell tilstand i kum'),
+  ok('pumper', 'Funksjonstest pumper', { help: 'Kjør pumper manuelt i minst 30 sek.' }),
+  yn('arskontroll', 'Har det vært årskontroll siden forrige månedlige test?', { flag: [], neutral: true }),
+  yn('auto', 'Er pumper satt tilbake i AUTO?'),
+];
 const svc = (p, o = {}) => [
   ok(p + '_ok', o.q || 'Kontroller at service intervaller følges og utstyret fungerer?', o.help ? { help: o.help } : {}),
   txt(p + '_lev', o.lev || 'Navn på service leverandør', { carry: true }),
@@ -105,13 +111,10 @@ const TEMPLATES = [
   {
     id: 'kloakk', name: 'Kloakktest', site: 'Olsrød Park – Teknisk', months: 1,
     sections: [
-      { id: 'kum', title: 'Kloakkum', repeat: true, unit: 'Kum', defaultCount: 2, items: [
-        cho('sted', 'Hvor testes det?', ['Gammel del', 'Level'], { allowOther: true }),
-        ok('tilstand', 'Generell tilstand i kum'),
-        ok('pumper', 'Funksjonstest pumper', { help: 'Kjør pumper manuelt i minst 30 sek.' }),
-        yn('arskontroll', 'Har det vært årskontroll siden forrige månedlige test?', { flag: [], neutral: true }),
-        yn('auto', 'Er pumper satt tilbake i AUTO?'),
-      ] },
+      { id: 'sted', title: 'Hvilket sted', items: [mul('hvor', 'Hvor testes det? Velg ett eller begge.', ['Gammel del', 'Level'])] },
+      { id: 'gml', title: 'Kloakkum gammel del', showIf: { item: 'sted.hvor', includes: 'Gammel del' }, items: kum() },
+      { id: 'level', title: 'Kloakkum Level', showIf: { item: 'sted.hvor', includes: 'Level' }, items: kum() },
+      { id: 'kum', title: 'Kloakkum', repeat: true, unit: 'Kum', defaultCount: 2, showIf: { legacy: 'kum' }, items: [cho('sted', 'Hvor testes det?', ['Gammel del', 'Level'], { allowOther: true }), ...kum()] },
     ],
   },
   {
@@ -305,8 +308,8 @@ const ANLEGG = [
   ['op', 'op_slanger', 'Brannslanger', '', [['internkontroll', ['slanger']]]],
   ['op', 'op_royk', 'Røykventilasjon og branngardiner', '', [['internkontroll', ['royk']]]],
   ['op', 'op_dorer', 'Branndører og porter', '', [['internkontroll', ['dorer']]]],
-  ['op', 'op_kloakk_gml', 'Kloakkum og pumper – gammel del', '', [['kloakk', ['kum'], { w: ['sted', 'Gammel del'] }]]],
-  ['op', 'op_kloakk_level', 'Kloakkum og pumper – Level', '', [['kloakk', ['kum'], { w: ['sted', 'Level'] }]]],
+  ['op', 'op_kloakk_gml', 'Kloakkum og pumper – gammel del', '', [['kloakk', ['gml']], ['kloakk', ['kum'], { w: ['sted', 'Gammel del'] }]]],
+  ['op', 'op_kloakk_level', 'Kloakkum og pumper – Level', '', [['kloakk', ['level']], ['kloakk', ['kum'], { w: ['sted', 'Level'] }]]],
   ['op', 'op_vent', 'Ventilasjon', '', [['op_ukentlig', R('vent')]]],
   ['op', 'op_varme', 'Varmeanlegg', 'Glykolkurs og trykkvann', [['op_ukentlig', R('glykol')]]],
   ['op', 'op_menerga', 'Menerga-anlegg', '', [['op_ukentlig', R('menerga')]]],
@@ -360,7 +363,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-10-31 m';
+const APP_VERSION = '2026-10-31 n';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -450,6 +453,7 @@ function toneFor(it, v) {
 }
 function secVisible(sec, ins) {
   const c = sec.showIf; if (!c) return true;
+  if (c.legacy) return Object.keys(ins.answers).some(k => k.startsWith(c.legacy + '#'));
   const v = ins.answers[c.item]?.value;
   if (c.includes) return Array.isArray(v) && v.includes(c.includes);
   return true;
