@@ -46,7 +46,7 @@ const uke = o => [
 const svc = (p, o = {}) => [
   ok(p + '_ok', o.q || 'Kontroller at service intervaller følges og utstyret fungerer?', o.help ? { help: o.help } : {}),
   txt(p + '_lev', o.lev || 'Navn på service leverandør', { carry: true }),
-  dat(p + '_dato', o.dato || 'Dato for siste eksterne kontroll', { carry: true }),
+  dat(p + '_dato', o.dato || 'Dato for siste eksterne kontroll', { carry: true, yearly: true }),
 ];
 
 const TEMPLATES = [
@@ -229,10 +229,10 @@ const TEMPLATES = [
         hd('h_spr', 'Sprinkleranlegg'),
         ok('spr_ok1', 'Kontroller at service intervaller følges og utstyret fungerer?', { help: 'Hvis loggbok på papir, ta bilde og legg ved.' }),
         txt('spr_lev', 'Navn på service leverandør', { carry: true }),
-        dat('spr_dato', 'Dato for siste kontroll', { carry: true }),
+        dat('spr_dato', 'Dato for siste kontroll', { carry: true, yearly: true }),
         ok('spr_ok2', 'Kontroller at service intervaller følges og utstyret fungerer?', { help: 'Hvis loggbok på papir, ta bilde og legg ved.' }),
         txt('spr_kontrollor', 'Navn på uavhengig kontrollør', { carry: true }),
-        dat('spr_dato2', 'Dato for siste kontroll', { carry: true }),
+        dat('spr_dato2', 'Dato for siste kontroll', { carry: true, yearly: true }),
         dat('spr_egen', 'Dato for siste egenkontroll', { carry: true }),
         yn('spr_logg', 'Bilde av loggbok lagt ved?', { flag: [], neutral: true, help: 'Bruk Bilde-knappen.' }),
         hd('h_dorer', 'Branndører / Rømningsveier'),
@@ -263,6 +263,10 @@ const TEMPLATES = [
   },
 ];
 TEMPLATES.push({
+  id: 'avvik', name: 'Avviksmelding', site: '', hidden: true,
+  sections: [{ id: 'avvik', title: 'Avvik', items: [{ id: 'feil', type: 'avvik', label: 'Beskriv avviket', help: 'Ta bilde og skriv i handlingen hva som må gjøres. Handlingen blir et kort i Trello når du fullfører.' }] }],
+});
+TEMPLATES.push({
   id: 'halvar_op', name: 'Halvårlig servicesjekk OP', site: 'Olsrød Park – Teknisk', months: 6,
   sections: [
     { id: 'heis1', title: 'Heis 1', items: svc('s', { help: 'Sjekk serviceboka/loggen i maskinrom eller heisstol.' }) },
@@ -275,6 +279,7 @@ TEMPLATES.sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
 const TRELLO = { board: '69fd92b5f73c4c4645f0a9b2', lists: { olsrod: '69fd92efa0fbbbd4a10fc0ee', vk: '69fd92f5a4757aaa7dcfef02', svk: '6ae5a990f8db6f1ba0c7970f', tb: '6ae5a995305871414c09e581' } };
 const TLIST = { internkontroll: 'olsrod', sprinkel_op: 'olsrod', kloakk: 'olsrod', op_ukentlig: 'olsrod', halvar_op: 'olsrod', sprinkel_vk: 'vk', vk_ukentlig: 'vk', vernerunde_halvar: 'vk', vernerunde: 'svk', sprinkel_tb: 'tb' };
 TEMPLATES.forEach(t => { t.tl = TLIST[t.id]; });
+const listKey = (ins, key) => { const t = TPL[ins.templateId]; return ins.tl || findItem(t, key).sec?.tl || t.tl; };
 const TPL = Object.fromEntries(TEMPLATES.map(t => [t.id, t]));
 /* ---------- Anleggsregister ----------
    Hvert anlegg peker på punktene i sjekklistene som kontrollerer det: [mal, [nøkler]].
@@ -355,7 +360,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-10-31 i';
+const APP_VERSION = '2026-10-31 j';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -430,9 +435,11 @@ window.addEventListener('pagehide', flushAll);
 /* ---------- Logikk ---------- */
 const optsOf = it => it.options || (TYPES[it.type] ? TYPES[it.type].opts : []);
 const flagsOf = it => it.flag || (TYPES[it.type] ? TYPES[it.type].flag : []);
+const isoOk = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+const deadlineOf = (it, v) => !isoOk(v) ? null : it.expiry ? v : it.yearly ? addMonths(v, 12) : null;
 function isFlag(it, a) {
   if (!a || a.value == null || a.value === '') return false;
-  if (it.type === 'date') return !!it.expiry && a.value < todayISO();
+  if (it.type === 'date') { const dl = deadlineOf(it, a.value); return !!dl && dl < todayISO(); }
   return flagsOf(it).includes(a.value);
 }
 function toneFor(it, v) {
@@ -540,6 +547,11 @@ function anlState(a) {
     const next = last ? (t.days ? addDays(last.date, t.days) : addMonths(last.date, t.months)) : null;
     covs.push({ c, t, last, flags: lastFlags, next, d: next ? daysBetween(todayISO(), next) : null, draft: all.find(i => i.templateId === c.t && i.status !== 'complete') });
   }
+  for (const i of all) if (i.anl === a.id) {
+    const acts = Object.entries(i.answers).flatMap(([key, ans]) => (ans.actions || []).map(act => ({ key, act })));
+    for (const { key, act } of acts) if (!act.done) open.push({ i, key, act });
+    if (i.status === 'complete') hist.push({ i, t: TPL.avvik, n: 1, flags: acts.map(z => ({ it: { label: (z.act.text || 'Avvik').split('\n')[0] } })) });
+  }
   hist.sort((x, y) => (y.i.date || '').localeCompare(x.i.date || ''));
   const dated = covs.filter(x => x.next).sort((x, y) => x.next.localeCompare(y.next));
   const nextDue = dated[0]?.next || null;
@@ -575,6 +587,13 @@ function newInspection(tid) {
 }
 function openSite(id) { S.site = id; S.anl = null; S.cur = null; S.showAllHist = false; S.view = 'site'; render(); window.scrollTo(0, 0); }
 function openAnl(id) { S.anl = id; S.site = ANL[id].site; S.view = 'anl'; S.cur = null; render(); window.scrollTo(0, 0); }
+function newAvvik(anlId) {
+  const a = ANL[anlId], site = SITES.find(x => x.id === a.site), id = uid();
+  const ins = { id: uid(), templateId: 'avvik', anl: anlId, tl: site.tl, site: `${site.name} – ${a.name}`, date: todayISO(), by: S.settings.by, status: 'draft',
+    answers: { 'avvik.feil': { actions: [{ id, text: '', due: addDays(todayISO(), 14), who: S.settings.by, prio: 'Middels', done: false }] } }, repeats: {}, createdAt: Date.now(), updatedAt: Date.now() };
+  S.ins[ins.id] = ins; flush(ins.id); openIns(ins.id);
+  document.getElementById('at-' + id)?.focus();
+}
 function openIns(id) { S.cur = id; S.view = 'ins'; S.confirmFinish = false; render(); window.scrollTo(0, 0); }
 function goHome(root) { flushAll(); syncTrello(); if (root) { S.anl = null; S.site = null; } S.cur = null; S.view = S.anl ? 'anl' : S.site ? 'site' : 'home'; render(); window.scrollTo(0, 0); }
 
@@ -636,7 +655,7 @@ function renderHome() {
       </ol></details>
       <h3 class="h3">Koder og lokale notater</h3>
       <p class="muted small">Lagres bare på denne telefonen. Vises øverst i sjekklisten, men kommer ikke med i PDF-en. Er med i sikkerhetskopien, så oppbevar den privat.</p>
-      ${TEMPLATES.map(t => `<label class="fld"><span>${esc(t.name)}</span><textarea class="inp" id="ln-${t.id}" rows="2" data-lnote="${t.id}">${esc(S.settings.notes[t.id] || '')}</textarea></label>`).join('')}
+      ${TEMPLATES.filter(t => !t.hidden).map(t => `<label class="fld"><span>${esc(t.name)}</span><textarea class="inp" id="ln-${t.id}" rows="2" data-lnote="${t.id}">${esc(S.settings.notes[t.id] || '')}</textarea></label>`).join('')}
       <p class="muted small">Argus, versjon ${APP_VERSION}</p>
       <div class="row-btns"><button class="btn" data-act="force-update">Hent nyeste versjon</button></div>
       <h3 class="h3">Sikkerhetskopi</h3>
@@ -655,6 +674,10 @@ function renderHome() {
     }).join('')}</div></section>`;
   }
 
+  {
+    const lb = S.settings.lastBackup, ndone = all.filter(i => i.status === 'complete').length;
+    if (ndone && (!lb || daysBetween(lb, todayISO()) >= 7)) h += `<div class="notice backup"><strong>${lb ? `Siste sikkerhetskopi er ${daysBetween(lb, todayISO())} dager gammel.` : 'Du har ikke tatt sikkerhetskopi ennå.'}</strong> Alt ligger bare på denne telefonen. Lagre kopien i iCloud Drive eller Google Drive.<div class="row-btns"><button class="btn primary" data-act="export">Lag sikkerhetskopi nå</button></div></div>`;
+  }
   h += `<section><h2 class="h2">Velg bygg</h2><div class="list">${SITES.map(site => {
     const ss = siteState(site);
     return `<button class="sitebtn" data-act="site" data-id="${site.id}"><span class="dot ${ss.cls}" aria-hidden="true"></span>
@@ -666,7 +689,7 @@ function renderHome() {
 
 const rank = { bad: 0, warn: 1, ok: 2, na: 3 };
 const doneList = () => Object.values(S.ins).filter(i => i.status === 'complete').sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.updatedAt - a.updatedAt);
-const actSite = (i, key) => { const t = TPL[i.templateId]; const tl = findItem(t, key).sec?.tl || t.tl; return SITES.find(x => x.tl === tl)?.id; };
+const actSite = (i, key) => { const tl = listKey(i, key); return SITES.find(x => x.tl === tl)?.id; };
 function siteOpen(site) {
   const out = [];
   for (const i of Object.values(S.ins)) if (TPL[i.templateId]) for (const [key, a] of Object.entries(i.answers)) for (const act of a.actions || []) if (!act.done && actSite(i, key) === site.id) out.push({ i, key, act });
@@ -710,7 +733,7 @@ function renderSite() {
       <span class="rc-sub">${esc(t.name)} · ${fmt(i.date)}${act.due ? ` · <span class="${late ? 't-bad' : ''}">Frist ${fmt(act.due)}</span>` : ''}</span></button></div>`;
   }).join('')}</div>` : '<p class="empty">Ingen åpne handlinger.</p>';
   h += '</section>';
-  const mine = done.filter(i => site.tpls.includes(i.templateId));
+  const mine = done.filter(i => site.tpls.includes(i.templateId) || (i.templateId === 'avvik' && ANL[i.anl]?.site === site.id));
   const hist = S.showAllHist ? mine : mine.slice(0, 8);
   h += `<section><h2 class="h2">Fullførte</h2>`;
   h += mine.length ? `<div class="list">${hist.map(i => {
@@ -728,7 +751,8 @@ function renderAnl() {
   const a = ANL[S.anl], st = anlState(a), site = SITES.find(x => x.id === a.site);
   let h = `<section class="panel meta"><h1 class="ins-title">${esc(a.name)}</h1>
     <p class="muted">${esc(site.name)}${a.note ? ' · ' + esc(a.note) : ''}</p>
-    <p><span class="pill ${st.cls}">${esc(st.text)}</span></p></section>`;
+    <p><span class="pill ${st.cls}">${esc(st.text)}</span></p>
+    <button class="btn primary" data-act="avvik" data-id="${a.id}">Meld avvik</button></section>`;
   h += `<section><h2 class="h2">Kontroller</h2><div class="list">${st.covs.map(x => {
     const due = dueInfo(x.t, x.last);
     return `<div class="panel cov"><div class="tpl-top"><span class="tpl-name">${esc(x.t.name)}</span><span class="freq">${freqLabel(x.t)}</span></div>
@@ -748,7 +772,7 @@ function renderAnl() {
   h += `<section><h2 class="h2">Historikk</h2>`;
   h += st.hist.length ? `<div class="list">${st.hist.slice(0, 30).map(({ i, t, n, flags }) => `<div class="row-card"><button class="row-main" data-act="open" data-id="${i.id}">
       <span class="rc-title">${fmt(i.date)} · ${esc(t.name)}</span>
-      <span class="rc-sub">${flags.length ? `<b class="t-bad">${flags.length} avvik</b>: ${esc(flags.map(f => f.it.label).join('; ').slice(0, 140))}` : `${n} punkter, ingen avvik`}</span></button>
+      <span class="rc-sub">${flags.length ? `<b class="t-bad">${flags.length} avvik</b>: ${esc(flags.map(f => f.it.label).join('; ').slice(0, 140))}` : `${n} ${n === 1 ? "punkt" : "punkter"}, ingen avvik`}</span></button>
       <button class="link" data-act="pdf" data-id="${i.id}">PDF</button></div>`).join('')}</div>` : '<p class="empty">Ingen fullførte kontroller av dette anlegget ennå.</p>';
   h += '</section>';
   return h;
@@ -815,7 +839,8 @@ function itemHTML(ins, it, key) {
   } else if (it.type === 'text') {
     ctl = `<input class="inp" id="t-${k}" data-bind="${k}" data-field="value" value="${esc(a.value ?? '')}">`;
   } else if (it.type === 'date') {
-    ctl = `<input class="inp date" id="d-${k}" type="date" data-bind="${k}" data-field="value" data-rerender="1" value="${esc(a.value ?? '')}">${flag ? '<span class="t-bad small">Utløpt</span>' : ''}`;
+    const dl = deadlineOf(it, a.value);
+    ctl = `<input class="inp date" id="d-${k}" type="date" data-bind="${k}" data-field="value" data-rerender="1" value="${esc(a.value ?? '')}">${flag ? `<span class="t-bad small">${it.yearly ? 'Årlig kontroll forfalt ' + fmt(dl) : 'Utløpt'}</span>` : it.yearly && dl ? `<span class="muted small">Neste kontroll senest ${fmt(dl)}</span>` : ''}`;
   }
   const note = a.note != null ? `<textarea class="inp note" id="nt-${k}" rows="2" data-bind="${k}" data-field="note" placeholder="Notat">${esc(a.note)}</textarea>` : '';
   const thumbs = photos.length ? `<div class="thumbs">${photos.map((pid, ix) => `<button type="button" class="thumb" data-act="thumb" data-key="${k}" data-ix="${ix}" aria-label="Åpne bilde ${ix + 1}"><img data-pid="${pid}" alt=""></button>`).join('')}</div>` : '';
@@ -891,6 +916,7 @@ document.addEventListener('click', async e => {
       location.reload(); break;
     case 'anl': openAnl(b.dataset.id); break;
     case 'site': openSite(b.dataset.id); break;
+    case 'avvik': newAvvik(b.dataset.id); break;
     case 'to-site': openSite(S.site); break;
     case 'settings': S.showSettings = !S.showSettings; render(); break;
     case 'new': newInspection(b.dataset.tpl); break;
@@ -937,6 +963,7 @@ document.addEventListener('click', async e => {
       ins.repeats[sec.id] = n - 1; touch(ins); render(); break;
     }
     case 'finish': {
+      if (ins.templateId === 'avvik' && !Object.values(ins.answers).some(z => (z.actions || []).some(q => (q.text || '').trim()))) { toast('Skriv hva som må gjøres i handlingen før du fullfører.', 4000); break; }
       const st = stats(ins);
       if (st.unanswered && !S.confirmFinish) { S.confirmFinish = true; render(); break; }
       await finish(ins); break;
@@ -1063,7 +1090,32 @@ $('#ed-del').onclick = async () => {
 };
 
 /* ---------- Fullfør og PDF ---------- */
+function ctxLabel(tpl, key) {
+  const { sec, it } = findItem(tpl, key); if (!sec) return '';
+  let head = null;
+  for (const x of sec.items) { if (x === it) break; if (x.type === 'heading') head = x.label; }
+  return head || sec.title;
+}
+function autoActions(ins) {
+  const tpl = TPL[ins.templateId], today = todayISO(); let n = 0;
+  const horizon = (tpl.days || (tpl.months || 12) * 31) + 30;
+  for (const x of walk(tpl, ins)) {
+    if (x.it.type !== 'date') continue;
+    const a = ins.answers[x.key]; const dl = deadlineOf(x.it, a?.value); if (!dl) continue;
+    if (daysBetween(today, dl) > horizon) continue;
+    const dup = Object.values(S.ins).some(i => i.templateId === ins.templateId && Object.entries(i.answers).some(([k, z]) => k === x.key && (z.actions || []).some(q => q.auto === x.key && (q.autoFor === dl || !q.done))));
+    if (dup) continue;
+    const ctx = ctxLabel(tpl, x.key), late = dl < today;
+    const text = x.it.yearly ? `${ctx}: årlig kontroll ${late ? 'forfalt' : 'forfaller'} ${fmt(dl)} – bestill kontroll` : `${ctx}: ${x.it.label.toLowerCase()} ${fmt(dl)} – bestill nytt`;
+    const due = addDays(dl, -30) > today ? addDays(dl, -30) : addDays(today, 7);
+    (a.actions ||= []).push({ id: uid(), text, due, who: ins.by || S.settings.by, prio: late ? 'Høy' : 'Middels', done: false, auto: x.key, autoFor: dl });
+    n++;
+  }
+  return n;
+}
 async function finish(ins) {
+  const nAuto = autoActions(ins);
+  if (nAuto) toast(`${nAuto} ${nAuto === 1 ? 'påminnelse' : 'påminnelser'} om utløp/kontroll lagt til`, 4000);
   ins.status = 'complete'; ins.completedAt = Date.now(); S.confirmFinish = false;
   touch(ins); await flush(ins.id);
   syncTrello();
@@ -1235,6 +1287,7 @@ async function exportBackup() {
   for (const p of await DB.all('photos')) photos.push({ id: p.id, w: p.w, h: p.h, data: await blobToB64(p.blob) });
   const data = { app: 'oseberg-inspeksjon', version: 1, exportedAt: new Date().toISOString(), settings: { ...S.settings, trello: undefined }, inspections: await DB.all('inspections'), photos };
   const file = new File([JSON.stringify(data)], `inspeksjoner-sikkerhetskopi-${todayISO()}.json`, { type: 'application/json' });
+  S.settings.lastBackup = todayISO(); saveSettings();
   S.ready_file = { file, title: 'Sikkerhetskopien er klar' };
   $('#toast').hidden = true; renderSheet();
 }
@@ -1289,6 +1342,7 @@ function cardDesc(ins, tpl, key, a, act) {
   const L = [];
   if ((act.text || '').includes('\n')) L.push(act.text.trim(), '');
   L.push(`**Sjekkliste:** ${tpl.name}`, `**Sted:** ${ins.site}`, `**Dato:** ${fmt(ins.date)}`);
+  if (ins.anl && ANL[ins.anl]) L.push(`**Anlegg:** ${ANL[ins.anl].name}`);
   L.push(`**Punkt:** ${sec ? sec.title + (sec.repeat ? ' – ' + sec.unit + ' ' + (inst + 1) : '') : ''}${it ? ' › ' + it.label : ''}`);
   if (val !== '') L.push(`**Svar:** ${val}`);
   if (a.note) L.push(`**Notat:** ${a.note}`);
@@ -1346,19 +1400,31 @@ function trelloHomeLine() {
   return `<div class="tr-line"><span class="muted small">${n ? n + ' venter på sending til Trello' : ''}${empty ? (n ? ' · ' : '') + empty + ' uten tekst (sendes ikke)' : ''}</span>${n ? '<button class="link" data-act="tr-sync">Send nå</button>' : ''}</div>`;
 }
 const trTag = (act, sent) => act.trello && act.trello.id
-  ? `<a class="tr-tag" href="${esc(act.trello.url)}" target="_blank" rel="noopener">I Trello ↗</a>`
+  ? `<a class="tr-tag" href="${esc(act.trello.url)}" target="_blank" rel="noopener">${act.closedIn ? 'Lukket i ' + esc(act.closedIn) : 'I Trello'} ↗</a>`
   : (sent ? '<span class="tr-tag wait">Venter på Trello</span>' : '');
 async function syncTrello(manual) {
   if (S.syncing) return;
   if (!trelloCfg()) { if (manual === true) toast('Legg inn API-nøkkel og token under Innstillinger først.'); return; }
   if (!navigator.onLine) { if (manual === true) toast('Ingen nett. Handlingene sendes når du har dekning igjen.'); return; }
-  S.syncing = true; let sent = 0, upd = 0, err = null;
+  S.syncing = true; let sent = 0, upd = 0, err = null, closed = 0;
   try {
+    const tracked = [];
+    for (const ins of Object.values(S.ins)) for (const a of Object.values(ins.answers)) for (const act of a.actions || []) if (act.trello?.id && !act.done) tracked.push({ ins, act });
+    if (tracked.length) {
+      const cards = await tfetch('GET', `boards/${TRELLO.board}/cards/all`, { fields: 'closed,dueComplete' });
+      if (Array.isArray(cards)) {
+        const byId = Object.fromEntries(cards.map(c => [c.id, c]));
+        for (const { ins, act } of tracked) {
+          const c = byId[act.trello.id];
+          if (!c || c.closed || c.dueComplete) { act.done = true; act.doneAt = todayISO(); act.closedIn = !c ? 'Trello (kortet er slettet)' : c.closed ? 'Trello (arkivert)' : 'Trello'; act.trello.done = true; closed++; await saveIns(ins); }
+        }
+      }
+    }
     for (const ins of Object.values(S.ins)) {
       if (ins.status !== 'complete') continue;
       const tpl = TPL[ins.templateId]; if (!tpl) continue;
       for (const [key, a] of Object.entries(ins.answers)) for (const act of a.actions || []) {
-        const listId = TRELLO.lists[findItem(tpl, key).sec?.tl || tpl.tl];
+        const listId = TRELLO.lists[listKey(ins, key)];
         if (!act.trello) { if (!listId || !(act.text || '').trim()) continue; await sendCard(ins, tpl, key, a, act, listId); sent++; }
         if (!act.trello) continue;
         if (act.trello.pics < (a.photos || []).length) await sendPhotos(ins, a, act);
@@ -1372,7 +1438,7 @@ async function syncTrello(manual) {
   S.syncing = false;
   await flushAll();
   if (err) { if (err.status || manual === true) toast(trelloErr(err), 7000); }
-  else if (sent) toast(`${sent} ${sent === 1 ? 'handling' : 'handlinger'} sendt til Trello`);
+  else if (sent || closed) toast([sent ? `${sent} ${sent === 1 ? 'handling' : 'handlinger'} sendt til Trello` : '', closed ? `${closed} lukket i Trello` : ''].filter(Boolean).join(' · '));
   else if (manual === true) toast(upd ? 'Trello er oppdatert' : 'Ingen handlinger venter');
   if (S.view !== 'ins' && !S.showSettings) render();
 }
