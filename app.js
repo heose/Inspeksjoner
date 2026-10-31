@@ -281,10 +281,10 @@ const TPL = Object.fromEntries(TEMPLATES.map(t => [t.id, t]));
    En nøkkel er 'seksjon' (hele seksjonen) eller 'seksjon.punkt'. Tillegg: x = punkter som ikke teller,
    w = bare instanser der et svar er lik en verdi (kloakkum). */
 const SITES = [
-  { id: 'op', name: 'Olsrød Park', short: 'OP', tpls: ['op_ukentlig', 'internkontroll', 'sprinkel_op', 'kloakk', 'halvar_op'] },
-  { id: 'vk', name: 'Vekterkvartalet', short: 'VK', tpls: ['vk_ukentlig', 'sprinkel_vk', 'vernerunde_halvar'] },
-  { id: 'svk', name: 'Sameiet VK', short: 'SVK', tpls: ['sprinkel_vk', 'vernerunde'] },
-  { id: 'tb', name: 'Tollbodgata 14', short: 'TB', tpls: ['sprinkel_tb'] },
+  { id: 'op', tl: 'olsrod', name: 'Olsrød Park', short: 'OP', tpls: ['op_ukentlig', 'internkontroll', 'sprinkel_op', 'kloakk', 'halvar_op'] },
+  { id: 'vk', tl: 'vk', name: 'Vekterkvartalet', short: 'VK', tpls: ['vk_ukentlig', 'sprinkel_vk', 'vernerunde_halvar'] },
+  { id: 'svk', tl: 'svk', name: 'Sameiet VK', short: 'SVK', tpls: ['sprinkel_vk', 'vernerunde'] },
+  { id: 'tb', tl: 'tb', name: 'Tollbodgata 14', short: 'TB', tpls: ['sprinkel_tb'] },
 ];
 const ALARM = ['h_nokkel', 'nokler', 'h_alarm', 'alarminfo', 'sentral', 'overforing'];
 const sv = (sec, p) => ['_ok', '_lev', '_dato'].map(x => sec + '.' + p + x);
@@ -355,7 +355,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-10-31 h';
+const APP_VERSION = '2026-10-31 i';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -573,9 +573,10 @@ function newInspection(tid) {
   S.ins[ins.id] = ins; flush(ins.id);
   openIns(ins.id);
 }
-function openAnl(id) { S.anl = id; S.view = 'anl'; S.cur = null; render(); window.scrollTo(0, 0); }
+function openSite(id) { S.site = id; S.anl = null; S.cur = null; S.showAllHist = false; S.view = 'site'; render(); window.scrollTo(0, 0); }
+function openAnl(id) { S.anl = id; S.site = ANL[id].site; S.view = 'anl'; S.cur = null; render(); window.scrollTo(0, 0); }
 function openIns(id) { S.cur = id; S.view = 'ins'; S.confirmFinish = false; render(); window.scrollTo(0, 0); }
-function goHome(root) { flushAll(); syncTrello(); if (root) S.anl = null; S.cur = null; S.view = S.anl ? 'anl' : 'home'; render(); window.scrollTo(0, 0); }
+function goHome(root) { flushAll(); syncTrello(); if (root) { S.anl = null; S.site = null; } S.cur = null; S.view = S.anl ? 'anl' : S.site ? 'site' : 'home'; render(); window.scrollTo(0, 0); }
 
 /* ---------- Visning ---------- */
 const app = $('#app');
@@ -587,11 +588,14 @@ function render() {
   anlCache = null;
   const bar = $('#topbar');
   if (S.view === 'anl' && ANL[S.anl] && S.ready) {
-    bar.innerHTML = `<button class="back" data-act="home-root" aria-label="Tilbake til oversikten">‹ Oversikt</button><div class="bar-title">${esc(ANL[S.anl].name)}</div><div class="bar-status"></div>`;
+    bar.innerHTML = `<button class="back" data-act="to-site" aria-label="Tilbake til bygget">‹ ${SITES.find(x => x.id === ANL[S.anl].site).short}</button><div class="bar-title">${esc(ANL[S.anl].name)}</div><div class="bar-status"></div>`;
     app.innerHTML = renderAnl();
+  } else if (S.view === 'site' && S.site && S.ready) {
+    bar.innerHTML = `<button class="back" data-act="home-root" aria-label="Tilbake til byggene">‹ Bygg</button><div class="bar-title">${esc(SITES.find(x => x.id === S.site).name)}</div><div class="bar-status"></div>`;
+    app.innerHTML = renderSite();
   } else if (S.view === 'ins' && cur()) {
     const t = TPL[cur().templateId];
-    bar.innerHTML = `<button class="back" data-act="home" aria-label="Tilbake">‹ ${S.anl && ANL[S.anl] ? 'Anlegg' : 'Oversikt'}</button><div class="bar-title">${esc(t.name)}</div><div class="bar-status" id="save-status">Lagret</div>`;
+    bar.innerHTML = `<button class="back" data-act="home" aria-label="Tilbake">‹ ${S.anl && ANL[S.anl] ? 'Anlegg' : S.site ? SITES.find(x => x.id === S.site).short : 'Oversikt'}</button><div class="bar-title">${esc(t.name)}</div><div class="bar-status" id="save-status">Lagret</div>`;
     app.innerHTML = renderIns();
   } else {
     bar.innerHTML = `<div class="brand"><span class="brand-name">Argus</span><span class="brand-co">${esc(S.settings.company)}</span></div><button class="ghost-sm" data-act="settings">${S.showSettings ? 'Lukk' : 'Innstillinger'}</button>`;
@@ -651,32 +655,53 @@ function renderHome() {
     }).join('')}</div></section>`;
   }
 
+  h += `<section><h2 class="h2">Velg bygg</h2><div class="list">${SITES.map(site => {
+    const ss = siteState(site);
+    return `<button class="sitebtn" data-act="site" data-id="${site.id}"><span class="dot ${ss.cls}" aria-hidden="true"></span>
+      <span class="anl-txt"><span class="site-name">${esc(site.name)} <span class="count">${site.short}</span></span>
+      <span class="rc-sub ${ss.cls === 'bad' ? 't-bad' : ''}">${esc(ss.text)}</span><span class="rc-sub">${esc(ss.rounds)}</span></span><span class="chev" aria-hidden="true">›</span></button>`;
+  }).join('')}</div>${trelloHomeLine()}</section>`;
+  return h;
+}
+
+const rank = { bad: 0, warn: 1, ok: 2, na: 3 };
+const doneList = () => Object.values(S.ins).filter(i => i.status === 'complete').sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.updatedAt - a.updatedAt);
+const actSite = (i, key) => { const t = TPL[i.templateId]; const tl = findItem(t, key).sec?.tl || t.tl; return SITES.find(x => x.tl === tl)?.id; };
+function siteOpen(site) {
+  const out = [];
+  for (const i of Object.values(S.ins)) if (TPL[i.templateId]) for (const [key, a] of Object.entries(i.answers)) for (const act of a.actions || []) if (!act.done && actSite(i, key) === site.id) out.push({ i, key, act });
+  return out.sort((x, y) => (x.act.due || '9').localeCompare(y.act.due || '9'));
+}
+function siteState(site) {
+  const sts = ANLEGG.filter(a => a.site === site.id).map(anlState);
+  const nbad = sts.filter(x => x.cls === 'bad').length, nwarn = sts.filter(x => x.cls === 'warn').length, nna = sts.filter(x => x.cls === 'na').length;
+  const nopen = siteOpen(site).length;
+  const cls = nbad ? 'bad' : nwarn ? 'warn' : nna === sts.length ? 'na' : 'ok';
+  const text = nna === sts.length && !nopen ? 'Ingen kontroller i Argus ennå'
+    : [nbad ? `${nbad} anlegg med avvik eller forfalt` : '', nwarn ? `${nwarn} forfaller snart` : '', nopen ? `${nopen} ${nopen === 1 ? 'åpen handling' : 'åpne handlinger'}` : ''].filter(Boolean).join(' · ') || `Alle ${sts.length} anlegg i orden`;
+  const done = doneList(); const ds = site.tpls.map(id => ({ t: TPL[id], d: dueInfo(TPL[id], done.find(i => i.templateId === id)) }));
+  const late = ds.filter(x => x.d.cls === 'bad').length, never = ds.filter(x => x.d.cls === 'na').length;
+  const rounds = `${site.tpls.length} ${site.tpls.length === 1 ? 'runde' : 'runder'}` + (late ? ` · ${late} forfalt` : '') + (never ? ` · ${never} ikke startet` : '');
+  return { cls, text, rounds };
+}
+
+function renderSite() {
+  const site = SITES.find(x => x.id === S.site), done = doneList();
   const tplBtn = t => {
     const last = done.find(i => i.templateId === t.id); const due = dueInfo(t, last);
-    return `<button class="tpl" data-act="new" data-tpl="${t.id}">
+    const draft = Object.values(S.ins).find(i => i.templateId === t.id && i.status !== 'complete');
+    return `<button class="tpl" data-act="${draft ? 'open' : 'new'}" data-tpl="${t.id}"${draft ? ` data-id="${draft.id}"` : ''}>
       <span class="tpl-top"><span class="tpl-name">${esc(t.name)}</span><span class="freq">${freqLabel(t)}</span></span>
-      <span class="tpl-meta"><span class="pill ${due.cls}">${due.text}</span>${last ? `<span class="muted small">Sist ${fmt(last.date)}</span>` : ''}</span>
+      <span class="tpl-meta">${draft ? `<span class="pill warn">Påbegynt ${fmt(draft.date)}, trykk for å fortsette</span>` : `<span class="pill ${due.cls}">${due.text}</span>`}${last ? `<span class="muted small">Sist ${fmt(last.date)}</span>` : ''}</span>
     </button>`;
   };
   const anlBtn = (a, st) => `<button class="anl" data-act="anl" data-id="${a.id}"><span class="dot ${st.cls}" aria-hidden="true"></span>
     <span class="anl-txt"><span class="rc-title">${esc(a.name)}</span><span class="rc-sub ${st.cls === 'bad' ? 't-bad' : ''}">${esc(st.text)}</span></span><span class="chev" aria-hidden="true">›</span></button>`;
-  const rank = { bad: 0, warn: 1, ok: 2, na: 3 };
-  for (const site of SITES) {
-    const list = ANLEGG.filter(a => a.site === site.id).map(a => ({ a, st: anlState(a) }));
-    const hot = list.filter(x => x.st.cls === 'bad' || x.st.cls === 'warn').sort((x, y) => rank[x.st.cls] - rank[y.st.cls]);
-    const nbad = list.filter(x => x.st.cls === 'bad').length;
-    h += `<section class="site"><h2 class="h2">${esc(site.name)} <span class="count">${site.short}</span></h2>
-      <div class="tpl-list">${site.tpls.map(id => tplBtn(TPL[id])).join('')}</div>
-      ${hot.length ? `<div class="list">${hot.map(x => anlBtn(x.a, x.st)).join('')}</div>` : ''}
-      <details class="anl-all"><summary>Alle anlegg (${list.length})${nbad ? ` · <span class="t-bad">${nbad} med avvik eller forfalt</span>` : ''}</summary>
-        <div class="list">${list.map(x => anlBtn(x.a, x.st)).join('')}</div></details></section>`;
-  }
-
-  const open = [];
-  for (const i of all) for (const [key, a] of Object.entries(i.answers)) for (const act of a.actions || []) if (!act.done) open.push({ i, key, act });
-  open.sort((x, y) => (x.act.due || '9').localeCompare(y.act.due || '9'));
+  const list = ANLEGG.filter(a => a.site === site.id).map(a => ({ a, st: anlState(a) })).sort((x, y) => rank[x.st.cls] - rank[y.st.cls]);
+  let h = `<section><h2 class="h2">Inspeksjoner</h2><div class="tpl-list">${site.tpls.map(id => tplBtn(TPL[id])).join('')}</div></section>`;
+  h += `<section><h2 class="h2">Anlegg <span class="count">${list.length}</span></h2><div class="list">${list.map(x => anlBtn(x.a, x.st)).join('')}</div></section>`;
+  const open = siteOpen(site);
   h += `<section><h2 class="h2">Åpne handlinger <span class="count">${open.length}</span></h2>`;
-  h += trelloHomeLine();
   h += open.length ? `<div class="list">${open.map(({ i, key, act }) => {
     const t = TPL[i.templateId]; const late = act.due && act.due < todayISO();
     return `<div class="act-line"><input type="checkbox" id="hd-${act.id}" data-hdone="${i.id}|${esc(key)}|${act.id}" aria-label="Merk som utført">
@@ -685,16 +710,16 @@ function renderHome() {
       <span class="rc-sub">${esc(t.name)} · ${fmt(i.date)}${act.due ? ` · <span class="${late ? 't-bad' : ''}">Frist ${fmt(act.due)}</span>` : ''}</span></button></div>`;
   }).join('')}</div>` : '<p class="empty">Ingen åpne handlinger.</p>';
   h += '</section>';
-
-  const hist = S.showAllHist ? done : done.slice(0, 8);
+  const mine = done.filter(i => site.tpls.includes(i.templateId));
+  const hist = S.showAllHist ? mine : mine.slice(0, 8);
   h += `<section><h2 class="h2">Fullførte</h2>`;
-  h += done.length ? `<div class="list">${hist.map(i => {
+  h += mine.length ? `<div class="list">${hist.map(i => {
     const st = stats(i); const t = TPL[i.templateId];
     return `<div class="row-card"><button class="row-main" data-act="open" data-id="${i.id}">
-      <span class="rc-title">${esc(t.name)}</span><span class="rc-sub">${esc(i.site)} · ${fmt(i.date)}</span>
+      <span class="rc-title">${esc(t.name)}</span><span class="rc-sub">${fmt(i.date)} · ${esc(i.by || '')}</span>
       <span class="rc-sub">${st.flags ? `<b class="t-bad">${st.flags} avvik</b>` : 'Ingen avvik'} · ${st.actions} handlinger</span></button>
       <button class="link" data-act="pdf" data-id="${i.id}">PDF</button><button class="link danger" data-act="del-ins" data-id="${i.id}">Slett</button></div>`;
-  }).join('')}</div>${done.length > 8 && !S.showAllHist ? `<button class="link more" data-act="hist-all">Vis alle ${done.length}</button>` : ''}` : '<p class="empty">Fullførte inspeksjoner havner her.</p>';
+  }).join('')}</div>${mine.length > 8 && !S.showAllHist ? `<button class="link more" data-act="hist-all">Vis alle ${mine.length}</button>` : ''}` : '<p class="empty">Fullførte inspeksjoner for dette bygget havner her.</p>';
   h += '</section>';
   return h;
 }
@@ -865,6 +890,8 @@ document.addEventListener('click', async e => {
       try { for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); for (const k of await caches.keys()) await caches.delete(k); } catch (e) {}
       location.reload(); break;
     case 'anl': openAnl(b.dataset.id); break;
+    case 'site': openSite(b.dataset.id); break;
+    case 'to-site': openSite(S.site); break;
     case 'settings': S.showSettings = !S.showSettings; render(); break;
     case 'new': newInspection(b.dataset.tpl); break;
     case 'open': openIns(b.dataset.id); if (b.dataset.focus) { const el = document.getElementById('it-' + b.dataset.focus); if (el) el.scrollIntoView({ block: 'center' }); } break;
@@ -1347,7 +1374,7 @@ async function syncTrello(manual) {
   if (err) { if (err.status || manual === true) toast(trelloErr(err), 7000); }
   else if (sent) toast(`${sent} ${sent === 1 ? 'handling' : 'handlinger'} sendt til Trello`);
   else if (manual === true) toast(upd ? 'Trello er oppdatert' : 'Ingen handlinger venter');
-  if (S.view === 'home' && !S.showSettings) render();
+  if (S.view !== 'ins' && !S.showSettings) render();
 }
 
 /* ---------- Oppstart ---------- */
