@@ -278,7 +278,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-10-31 d';
+const APP_VERSION = '2026-10-31 e';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -1086,13 +1086,27 @@ function cardDesc(ins, tpl, key, a, act) {
   return L.join('\n');
 }
 const saveIns = ins => { ins.updatedAt = Date.now(); scheduleSave(ins.id); return flush(ins.id); };
+const PRIO_LABEL = { 'Høy': ['Prioritet høy', 'red'], 'Middels': ['Prioritet middels', 'orange'], 'Lav': ['Prioritet lav', 'yellow'] };
+async function prioLabel(prio) {
+  const def = PRIO_LABEL[prio || 'Lav']; if (!def) return null;
+  const t = S.settings.trello; t.labels ||= {};
+  if (t.labels[def[0]]) return t.labels[def[0]];
+  const all = await tfetch('GET', `boards/${TRELLO.board}/labels`, { fields: 'name,color', limit: 100 });
+  let l = all.find(x => (x.name || '').toLowerCase() === def[0].toLowerCase());
+  if (!l) l = await tfetch('POST', 'labels', { name: def[0], color: def[1], idBoard: TRELLO.board });
+  t.labels[def[0]] = l.id; saveSettings(); return l.id;
+}
 async function sendCard(ins, tpl, key, a, act, listId) {
   const members = await trelloMembers().catch(() => []);
+  const lab = await prioLabel(act.prio).catch(() => null);
   const mem = findMember(members, act.who);
   const params = { idList: listId, name: (act.text || '').trim().split('\n')[0].slice(0, 150), desc: cardDesc(ins, tpl, key, a, act), pos: 'top' };
   if (act.due) params.due = new Date(parseISO(act.due).getTime() + 12 * 36e5).toISOString();
   if (mem) params.idMembers = mem.id;
-  const c = await tfetch('POST', 'cards', params);
+  if (lab) params.idLabels = lab;
+  let c;
+  try { c = await tfetch('POST', 'cards', params); }
+  catch (e) { if (!lab || e.status !== 400) throw e; S.settings.trello.labels = {}; saveSettings(); delete params.idLabels; c = await tfetch('POST', 'cards', params); }
   act.trello = { id: c.id, url: c.shortUrl || c.url, done: false, pics: 0 };
   await saveIns(ins);
 }

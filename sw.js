@@ -1,5 +1,5 @@
 /* Offline-cache. Øk versjonen ved hver ny utgave av appen. */
-const V = 'argus-v5';
+const V = 'argus-v6';
 const FILES = ['./', './index.html', './app.js', './pdf.js', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener('activate', e => {
