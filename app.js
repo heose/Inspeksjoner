@@ -363,7 +363,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-10-31 o';
+const APP_VERSION = '2026-10-31 p';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -414,6 +414,8 @@ const S = {
 try { Object.assign(S.settings, JSON.parse(localStorage.getItem('insp-settings') || '{}')); } catch (e) {}
 S.settings.notes = S.settings.notes || {};
 S.settings.trello = S.settings.trello || {};
+S.settings.hub = S.settings.hub || {};
+try { S.hubMonth = JSON.parse(localStorage.getItem('insp-hub') || 'null'); } catch (e) { S.hubMonth = null; }
 const saveSettings = () => { try { localStorage.setItem('insp-settings', JSON.stringify(S.settings)); } catch (e) {} };
 
 const timers = {}; const chains = {};
@@ -663,6 +665,11 @@ function renderHome() {
         <li>Under Allowed origins legger du til <b>https://heose.github.io</b> og lagrer.</li>
         <li>Trykk Hent token her, trykk Allow i Trello, og kopier token-teksten hit.</li>
       </ol></details>
+      <h3 class="h3">Argus Hub</h3>
+      <p class="muted small">Delt logg over fullførte inspeksjoner og PDF-rapporter. Samme adresse og kode brukes på alle enheter. Lagres bare på denne telefonen og tas ikke med i sikkerhetskopien.</p>
+      <label class="fld"><span>Hub-adresse</span><input id="hub-url" data-hub="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://argus-hub.navn.workers.dev" value="${esc(S.settings.hub.url || '')}"></label>
+      <label class="fld"><span>Hub-kode</span><input id="hub-code" type="password" data-hub="code" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(S.settings.hub.code || '')}"></label>
+      <div class="row-btns"><button class="btn" data-act="hub-test">Test Hub</button><button class="btn" data-act="hub-sync">Oppdater nå</button></div>
       <h3 class="h3">Koder og lokale notater</h3>
       <p class="muted small">Lagres bare på denne telefonen. Vises øverst i sjekklisten, men kommer ikke med i PDF-en. Er med i sikkerhetskopien, så oppbevar den privat.</p>
       ${TEMPLATES.filter(t => !t.hidden).map(t => `<label class="fld"><span>${esc(t.name)}</span><textarea class="inp" id="ln-${t.id}" rows="2" data-lnote="${t.id}">${esc(S.settings.notes[t.id] || '')}</textarea></label>`).join('')}
@@ -695,6 +702,7 @@ function renderHome() {
       <span class="anl-txt"><span class="site-name">${esc(site.name)} <span class="count">${site.short}</span></span>
       <span class="rc-sub ${ss.cls === 'bad' ? 't-bad' : ''}">${esc(ss.text)}</span><span class="rc-sub">${esc(ss.rounds)}</span></span><span class="chev" aria-hidden="true">›</span></button>`;
   }).join('')}</div>${trelloHomeLine()}</section>`;
+  h += monthHtml(null);
   return h;
 }
 
@@ -735,6 +743,7 @@ function renderSite() {
   let h = `<button class="btn avvik-big" data-act="avvik-new" data-site="${site.id}">Meld avvik i ${esc(site.short)}</button>`;
   h += `<section><h2 class="h2">Inspeksjoner</h2><div class="tpl-list">${site.tpls.map(id => tplBtn(TPL[id])).join('')}</div></section>`;
   h += `<section><h2 class="h2">Anlegg <span class="count">${list.length}</span></h2><div class="list">${list.map(x => anlBtn(x.a, x.st)).join('')}</div></section>`;
+  h += monthHtml(site.id);
   const open = siteOpen(site);
   h += `<section><h2 class="h2">Åpne handlinger <span class="count">${open.length}</span></h2>${trelloHomeLine()}`;
   h += open.length ? `<div class="list">${open.map(({ i, key, act }) => {
@@ -1008,6 +1017,10 @@ document.addEventListener('click', async e => {
       catch (e) { toast(trelloErr(e), 8000); }
       break;
     case 'tr-sync': await syncTrello(true); break;
+    case 'hub-test':
+      try { await hubFetch('GET', '/ping'); toast('Koblet til Argus Hub', 4000); hubSync(); } catch (e) { toast(hubErr(e), 8000); }
+      break;
+    case 'hub-sync': await hubSync(true); break;
     case 'export': await exportBackup(); break;
     case 'import': $('#importpick').click(); break;
   }
@@ -1020,6 +1033,7 @@ function arm(b, label) {
 document.addEventListener('input', e => {
   const el = e.target; const ins = cur();
   if (el.dataset.trello) { const t = S.settings.trello; t[el.dataset.trello] = el.value.trim(); t.members = null; saveSettings(); return; }
+  if (el.dataset.hub) { S.settings.hub[el.dataset.hub] = el.value.trim(); saveSettings(); return; }
   if (el.dataset.lnote) { S.settings.notes[el.dataset.lnote] = el.value; saveSettings(); return; }
   if (el.dataset.set) { S.settings[el.dataset.set] = el.value; saveSettings(); return; }
   if (!ins) return;
@@ -1149,7 +1163,7 @@ async function finish(ins) {
   ins.status = 'complete'; ins.completedAt = Date.now(); S.confirmFinish = false;
   touch(ins); await flush(ins.id);
   if (ins.templateId === 'avvik') { goHome(); toast(trelloCfg() && navigator.onLine ? 'Avviket er registrert og sendes til Trello' : 'Avviket er registrert. Det sendes til Trello når du har dekning.', 3500); return; }
-  syncTrello();
+  syncTrello(); hubSync();
   await makePdf(ins);
 }
 async function makePdf(ins) {
@@ -1161,6 +1175,7 @@ async function makePdf(ins) {
     const t = TPL[ins.templateId];
     const name = `${t.name} ${ins.site.split(/[–,-]/)[0].trim()} ${fmt(ins.date).replace(/\./g, '-')}.pdf`.replace(/[\\/:*?"<>|]/g, '');
     S.ready_file = { file: new File([blob], name, { type: 'application/pdf' }), title: 'PDF-rapporten er klar' };
+    if (hubCfg() && navigator.onLine) hubFetch('PUT', `/pdf/${ins.id}?name=${encodeURIComponent(name)}`, blob, true).then(() => { ins.hubPdf = true; return saveIns(ins); }).catch(e => console.warn('Hub PDF', e));
   } catch (e) { toast('Kunne ikke lage PDF: ' + (e && e.message || e), 5000); console.error(e); }
   S.busy = false; render();
 }
@@ -1335,7 +1350,7 @@ async function exportBackup() {
   await flushAll();
   const photos = [];
   for (const p of await DB.all('photos')) photos.push({ id: p.id, w: p.w, h: p.h, data: await blobToB64(p.blob) });
-  const data = { app: 'oseberg-inspeksjon', version: 1, exportedAt: new Date().toISOString(), settings: { ...S.settings, trello: undefined }, inspections: await DB.all('inspections'), photos };
+  const data = { app: 'oseberg-inspeksjon', version: 1, exportedAt: new Date().toISOString(), settings: { ...S.settings, trello: undefined, hub: undefined }, inspections: await DB.all('inspections'), photos };
   const file = new File([JSON.stringify(data)], `inspeksjoner-sikkerhetskopi-${todayISO()}.json`, { type: 'application/json' });
   S.settings.lastBackup = todayISO(); saveSettings();
   S.ready_file = { file, title: 'Sikkerhetskopien er klar' };
@@ -1496,6 +1511,58 @@ async function syncTrello(manual) {
   if (S.view !== 'ins' && !S.showSettings) render();
 }
 
+/* ---------- Argus Hub (delt logg) ---------- */
+const hubCfg = () => { const h = S.settings.hub || {}; return h.url && h.code ? { url: h.url.replace(/\/+$/, ''), code: h.code } : null; };
+const hubErr = e => e && e.status === 401 ? 'Feil Hub-kode.' : e && e.status ? `Hub svarte med feil (${e.status}): ${e.message}` : 'Fikk ikke kontakt med Hub. Sjekk adressen og dekningen.';
+async function hubFetch(method, path, body, raw) {
+  const c = hubCfg(); if (!c) throw new Error('Hub er ikke satt opp');
+  const r = await fetch(c.url + path, { method, headers: { 'x-argus-code': c.code, ...(body && !raw ? { 'content-type': 'application/json' } : {}) }, body: raw ? body : body ? JSON.stringify(body) : undefined });
+  if (!r.ok) { let m = ''; try { m = (await r.json()).error; } catch (e) {} const e = new Error(m || String(r.status)); e.status = r.status; throw e; }
+  return r.json();
+}
+const insSite = i => i.siteId || ANL[i.anl]?.site || SITES.find(s => s.tpls.includes(i.templateId))?.id || null;
+const hubRec = i => ({ id: i.id, tpl: i.templateId, name: TPL[i.templateId]?.name || '', siteId: insSite(i), date: i.date, by: i.by || '', at: i.completedAt || i.updatedAt, flags: stats(i).flags || 0 });
+async function hubSync(manual) {
+  const c = hubCfg();
+  if (!c) { if (manual === true) toast('Legg inn adresse og kode til Hub under Innstillinger først.'); return; }
+  if (S.hubBusy) return;
+  if (!navigator.onLine) { if (manual === true) toast('Ingen nett. Oppdateres når du har dekning.'); return; }
+  S.hubBusy = true; S.hubErrMsg = null;
+  try {
+    for (const i of Object.values(S.ins)) {
+      if (i.status !== 'complete' || !TPL[i.templateId] || !i.date) continue;
+      const rec = hubRec(i), sig = JSON.stringify(rec);
+      if (i.hubSig === sig) continue;
+      await hubFetch('PUT', '/log/' + i.id, rec);
+      i.hubSig = sig; await saveIns(i);
+    }
+    const ym = todayISO().slice(0, 7);
+    const m = await hubFetch('GET', '/month/' + ym);
+    S.hubMonth = { ym, rows: m.rows || [], at: Date.now() };
+    try { localStorage.setItem('insp-hub', JSON.stringify(S.hubMonth)); } catch (e) {}
+    if (manual === true) toast('Oppdatert fra Hub');
+  } catch (e) { S.hubErrMsg = hubErr(e); console.error(e); if (manual === true) toast(S.hubErrMsg, 8000); }
+  S.hubBusy = false;
+  await flushAll();
+  if (S.view !== 'ins') render();
+}
+const MONTHS = ['januar', 'februar', 'mars', 'april', 'mai', 'juni', 'juli', 'august', 'september', 'oktober', 'november', 'desember'];
+function monthRows(siteId) {
+  const ym = todayISO().slice(0, 7), byId = {};
+  if (S.hubMonth && S.hubMonth.ym === ym) for (const r of S.hubMonth.rows) byId[r.id] = r;
+  for (const i of Object.values(S.ins)) if (i.status === 'complete' && TPL[i.templateId] && (i.date || '').slice(0, 7) === ym) byId[i.id] = hubRec(i);
+  return Object.values(byId).filter(r => r.tpl !== 'avvik' && (!siteId || r.siteId === siteId)).sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.at || 0) - (a.at || 0));
+}
+function monthHtml(siteId) {
+  const rows = monthRows(siteId), c = hubCfg(), ym = todayISO().slice(0, 7);
+  const fresh = S.hubMonth && S.hubMonth.ym === ym ? new Date(S.hubMonth.at).toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' }) : null;
+  let h = `<section><h2 class="h2">Gjennomført i ${MONTHS[+ym.slice(5) - 1]} <span class="count">${rows.length}</span></h2>`;
+  h += rows.length ? `<div class="list">${rows.map(r => `<div class="mrow"><span class="rc-title">${esc(r.name)}</span><span class="rc-sub">${siteId ? '' : esc(SITES.find(s => s.id === r.siteId)?.short || '') + ' · '}${fmt(r.date)}${r.by ? ' · ' + esc(r.by) : ''}${r.flags ? ` · <b class="t-bad">${r.flags} avvik</b>` : ''}</span></div>`).join('')}</div>` : '<p class="empty">Ingen fullførte inspeksjoner denne måneden.</p>';
+  h += c ? `<div class="tr-line"><span class="${S.hubErrMsg ? 't-bad ' : 'muted '}small">${S.hubErrMsg ? esc(S.hubErrMsg) : fresh ? 'Oppdatert kl. ' + fresh : 'Ikke hentet ennå'}</span><button class="link" data-act="hub-sync">${S.hubBusy ? 'Oppdaterer…' : 'Oppdater nå'}</button></div>`
+    : '<p class="muted small">Koble til Argus Hub under Innstillinger for å se det alle har gjort.</p>';
+  return h + '</section>';
+}
+
 /* ---------- Oppstart ---------- */
 (async () => {
   render();
@@ -1513,6 +1580,8 @@ async function syncTrello(manual) {
     navigator.serviceWorker.addEventListener('controllerchange', () => { if (had && !reloaded && S.view !== 'ins') { reloaded = true; location.reload(); } });
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => r.update()).catch(() => {});
   }
-  syncTrello();
-  window.addEventListener('online', () => syncTrello());
+  syncTrello(); hubSync();
+  window.addEventListener('online', () => { syncTrello(); hubSync(); });
+  let hubLast = Date.now();
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - hubLast > 60000) { hubLast = Date.now(); hubSync(); } });
 })();
