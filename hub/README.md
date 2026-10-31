@@ -18,7 +18,7 @@ Kostnad: 0 kr. Gratisgrensene (100 000 kall/dag, 1 000 skrivinger/dag til KV, 1 
 
 Hub sender Trello-kall for appen, så nye enheter ikke trenger nøkkel og token.
 
-1. Worker → Settings → Variables and Secrets → legg til to secrets: `TRELLO_KEY` (API-nøkkelen) og `TRELLO_TOKEN`.
+1. Worker → Settings → Variables and Secrets → legg til to secrets: `TRELLO_KEY` (API-nøkkelen) og `TRELLO_TOKEN` (store eller små bokstaver spiller ingen rolle).
 2. Lim inn nyeste `hub/worker.js` under Edit code og Deploy.
 3. I Argus: Innstillinger → Test tilkobling. Når Hub-kode er satt, brukes Hub automatisk og feltene for nøkkel og token skjules.
 

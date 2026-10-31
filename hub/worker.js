@@ -45,12 +45,14 @@ export default {
 
       // /trello/<sti>  – videresendes til api.trello.com/1/<sti>
       if (p[0] === 'trello') {
-        if (!env.TRELLO_KEY || !env.TRELLO_TOKEN) return json(req, { error: 'Trello er ikke satt opp i Hub' }, 500);
+        const sec = n => { const k = Object.keys(env).find(x => x.toLowerCase() === n); return k ? env[k] : undefined; };
+        const TKEY = sec('trello_key'), TTOKEN = sec('trello_token');
+        if (!TKEY || !TTOKEN) return json(req, { error: 'Trello er ikke satt opp i Hub' }, 500);
         const rest = p.slice(1).join('/');
         if (!TR_ALLOW.some(([m, re]) => m === req.method && re.test(rest))) return json(req, { error: 'Ikke tillatt' }, 403);
         const u = new URL('https://api.trello.com/1/' + rest);
         for (const [k, v] of url.searchParams) if (k !== 'key' && k !== 'token') u.searchParams.set(k, v);
-        u.searchParams.set('key', env.TRELLO_KEY); u.searchParams.set('token', env.TRELLO_TOKEN);
+        u.searchParams.set('key', TKEY); u.searchParams.set('token', TTOKEN);
         const init = { method: req.method, headers: {} };
         if (req.method !== 'GET') {
           init.body = await req.arrayBuffer();
