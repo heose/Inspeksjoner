@@ -1,5 +1,5 @@
 'use strict';
-/* Oseberg Inspeksjon – offline inspeksjonsapp. Data lagres i IndexedDB på enheten. */
+/* Argus – offline inspeksjonsapp. Data lagres i IndexedDB på enheten. */
 
 /* ---------- Sjekklister ---------- */
 const yn  = (id, label, o = {}) => ({ id, type: 'yn', label, ...o });
@@ -301,7 +301,7 @@ function render() {
     bar.innerHTML = `<button class="back" data-act="home" aria-label="Tilbake til oversikten">‹ Oversikt</button><div class="bar-title">${esc(t.name)}</div><div class="bar-status" id="save-status">Lagret</div>`;
     app.innerHTML = renderIns();
   } else {
-    bar.innerHTML = `<div class="brand"><span class="brand-name">Inspeksjoner</span><span class="brand-co">${esc(S.settings.company)}</span></div><button class="ghost-sm" data-act="settings">${S.showSettings ? 'Lukk' : 'Innstillinger'}</button>`;
+    bar.innerHTML = `<div class="brand"><span class="brand-name">Argus</span><span class="brand-co">${esc(S.settings.company)}</span></div><button class="ghost-sm" data-act="settings">${S.showSettings ? 'Lukk' : 'Innstillinger'}</button>`;
     app.innerHTML = S.ready ? renderHome() : (S.error ? `<p class="empty">${esc(S.error)}</p>` : '<p class="empty">Laster…</p>');
   }
   renderSheet();

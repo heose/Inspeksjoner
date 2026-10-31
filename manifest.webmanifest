@@ -1,6 +1,6 @@
 {
-  "name": "Oseberg Inspeksjon",
-  "short_name": "Inspeksjon",
+  "name": "Argus",
+  "short_name": "Argus",
   "lang": "no",
   "start_url": "./",
   "scope": "./",

@@ -1,4 +1,4 @@
-# Oseberg Inspeksjon
+# Argus
 
 Offline inspeksjonsapp (PWA) for iPhone. Sjekklister, bilder med markering, avvik, handlinger og PDF-rapport. Alt lagres lokalt på telefonen (IndexedDB).
 
