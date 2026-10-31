@@ -360,7 +360,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-10-31 j';
+const APP_VERSION = '2026-10-31 k';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -559,8 +559,8 @@ function anlState(a) {
   const soon = dated.find(x => x.d <= (x.t.days ? 2 : 7));
   const nflag = covs.reduce((n, x) => n + x.flags.length, 0);
   let cls, text;
-  if (!dated.length) { cls = 'na'; text = 'Ikke kontrollert i Argus ennå'; }
-  else if (open.length || nflag) { cls = 'bad'; text = [open.length ? open.length + (open.length === 1 ? ' åpen handling' : ' åpne handlinger') : '', nflag ? nflag + ' avvik' : ''].filter(Boolean).join(' · '); }
+  if (open.length || nflag) { cls = 'bad'; text = [open.length ? open.length + (open.length === 1 ? ' åpen handling' : ' åpne handlinger') : '', nflag ? nflag + ' avvik' : ''].filter(Boolean).join(' · '); }
+  else if (!dated.length) { cls = 'na'; text = 'Ikke kontrollert i Argus ennå'; }
   else if (overdue) { cls = 'bad'; text = 'Forfalt ' + fmt(overdue.next); }
   else if (soon) { cls = 'warn'; text = 'Forfaller ' + fmt(soon.next); }
   else { cls = 'ok'; text = 'Neste ' + fmt(nextDue); }
@@ -587,12 +587,18 @@ function newInspection(tid) {
 }
 function openSite(id) { S.site = id; S.anl = null; S.cur = null; S.showAllHist = false; S.view = 'site'; render(); window.scrollTo(0, 0); }
 function openAnl(id) { S.anl = id; S.site = ANL[id].site; S.view = 'anl'; S.cur = null; render(); window.scrollTo(0, 0); }
-function newAvvik(anlId) {
-  const a = ANL[anlId], site = SITES.find(x => x.id === a.site), id = uid();
-  const ins = { id: uid(), templateId: 'avvik', anl: anlId, tl: site.tl, site: `${site.name} – ${a.name}`, date: todayISO(), by: S.settings.by, status: 'draft',
+function avSite(ins) {
+  const site = SITES.find(x => x.id === ins.siteId);
+  ins.tl = site?.tl;
+  ins.site = [site?.name, ins.anl && ANL[ins.anl] ? ANL[ins.anl].name : ins.annet ? 'Annet' : '', (ins.where || '').trim()].filter(Boolean).join(' – ');
+}
+function newAvvik(o = {}) {
+  const siteId = o.anl ? ANL[o.anl].site : (o.site || S.settings.lastSite || null), id = uid();
+  const ins = { id: uid(), templateId: 'avvik', siteId, anl: o.anl || null, annet: false, where: '', date: todayISO(), by: S.settings.by, status: 'draft',
     answers: { 'avvik.feil': { actions: [{ id, text: '', due: addDays(todayISO(), 14), who: S.settings.by, prio: 'Middels', done: false }] } }, repeats: {}, createdAt: Date.now(), updatedAt: Date.now() };
+  avSite(ins);
   S.ins[ins.id] = ins; flush(ins.id); openIns(ins.id);
-  document.getElementById('at-' + id)?.focus();
+  S.pickKey = 'avvik.feil'; $('#filepick').click();
 }
 function openIns(id) { S.cur = id; S.view = 'ins'; S.confirmFinish = false; render(); window.scrollTo(0, 0); }
 function goHome(root) { flushAll(); syncTrello(); if (root) { S.anl = null; S.site = null; } S.cur = null; S.view = S.anl ? 'anl' : S.site ? 'site' : 'home'; render(); window.scrollTo(0, 0); }
@@ -678,6 +684,7 @@ function renderHome() {
     const lb = S.settings.lastBackup, ndone = all.filter(i => i.status === 'complete').length;
     if (ndone && (!lb || daysBetween(lb, todayISO()) >= 7)) h += `<div class="notice backup"><strong>${lb ? `Siste sikkerhetskopi er ${daysBetween(lb, todayISO())} dager gammel.` : 'Du har ikke tatt sikkerhetskopi ennå.'}</strong> Alt ligger bare på denne telefonen. Lagre kopien i iCloud Drive eller Google Drive.<div class="row-btns"><button class="btn primary" data-act="export">Lag sikkerhetskopi nå</button></div></div>`;
   }
+  h += `<button class="btn avvik-big" data-act="avvik-new">Meld avvik</button>`;
   h += `<section><h2 class="h2">Velg bygg</h2><div class="list">${SITES.map(site => {
     const ss = siteState(site);
     return `<button class="sitebtn" data-act="site" data-id="${site.id}"><span class="dot ${ss.cls}" aria-hidden="true"></span>
@@ -721,7 +728,8 @@ function renderSite() {
   const anlBtn = (a, st) => `<button class="anl" data-act="anl" data-id="${a.id}"><span class="dot ${st.cls}" aria-hidden="true"></span>
     <span class="anl-txt"><span class="rc-title">${esc(a.name)}</span><span class="rc-sub ${st.cls === 'bad' ? 't-bad' : ''}">${esc(st.text)}</span></span><span class="chev" aria-hidden="true">›</span></button>`;
   const list = ANLEGG.filter(a => a.site === site.id).map(a => ({ a, st: anlState(a) })).sort((x, y) => rank[x.st.cls] - rank[y.st.cls]);
-  let h = `<section><h2 class="h2">Inspeksjoner</h2><div class="tpl-list">${site.tpls.map(id => tplBtn(TPL[id])).join('')}</div></section>`;
+  let h = `<button class="btn avvik-big" data-act="avvik-new" data-site="${site.id}">Meld avvik i ${esc(site.short)}</button>`;
+  h += `<section><h2 class="h2">Inspeksjoner</h2><div class="tpl-list">${site.tpls.map(id => tplBtn(TPL[id])).join('')}</div></section>`;
   h += `<section><h2 class="h2">Anlegg <span class="count">${list.length}</span></h2><div class="list">${list.map(x => anlBtn(x.a, x.st)).join('')}</div></section>`;
   const open = siteOpen(site);
   h += `<section><h2 class="h2">Åpne handlinger <span class="count">${open.length}</span></h2>`;
@@ -733,7 +741,7 @@ function renderSite() {
       <span class="rc-sub">${esc(t.name)} · ${fmt(i.date)}${act.due ? ` · <span class="${late ? 't-bad' : ''}">Frist ${fmt(act.due)}</span>` : ''}</span></button></div>`;
   }).join('')}</div>` : '<p class="empty">Ingen åpne handlinger.</p>';
   h += '</section>';
-  const mine = done.filter(i => site.tpls.includes(i.templateId) || (i.templateId === 'avvik' && ANL[i.anl]?.site === site.id));
+  const mine = done.filter(i => site.tpls.includes(i.templateId) || (i.templateId === 'avvik' && (i.siteId || ANL[i.anl]?.site) === site.id));
   const hist = S.showAllHist ? mine : mine.slice(0, 8);
   h += `<section><h2 class="h2">Fullførte</h2>`;
   h += mine.length ? `<div class="list">${hist.map(i => {
@@ -784,10 +792,18 @@ function renderIns() {
     <h1 class="ins-title">${esc(tpl.name)}</h1>
     ${ins.status === 'complete' ? `<p class="done-note">Fullført. Endringer lagres, og du kan lage ny PDF når som helst.</p>` : ''}
     <div class="fields">
-      <label class="fld wide"><span>Sted</span><input id="m-site" data-meta="site" value="${esc(ins.site)}"></label>
+      ${ins.templateId === 'avvik' ? '' : `<label class="fld wide"><span>Sted</span><input id="m-site" data-meta="site" value="${esc(ins.site)}"></label>`}
       <label class="fld"><span>Dato</span><input id="m-date" type="date" data-meta="date" value="${esc(ins.date)}"></label>
       <label class="fld"><span>Utført av</span><input id="m-by" data-meta="by" value="${esc(ins.by)}"></label>
     </div></section>`;
+  if (ins.templateId === 'avvik') {
+    const site = SITES.find(x => x.id === ins.siteId);
+    h += `<section class="panel avf"><h2 class="h3">Hvor er avviket?</h2>
+      <div class="q">Bygg</div><div class="seg" role="group" aria-label="Bygg">${SITES.map(x => `<button type="button" data-act="av-site" data-id="${x.id}" aria-pressed="${x.id === ins.siteId}"${x.id === ins.siteId ? ' data-tone="sel"' : ''}>${x.short}</button>`).join('')}</div>
+      ${site ? `<label class="fld"><span>Anlegg</span><select id="av-anl" data-avf="anl"><option value="">Velg anlegg…</option>${ANLEGG.filter(a => a.site === site.id).map(a => `<option value="${a.id}"${ins.anl === a.id ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}<option value="annet"${ins.annet ? ' selected' : ''}>Annet</option></select></label>
+      <label class="fld"><span>Hvor?${ins.annet ? ' (må fylles ut for Annet)' : ' (valgfritt)'}</span><input id="av-where" data-avf="where" value="${esc(ins.where || '')}" placeholder="F.eks. trapp B, 2. etg"></label>` : '<p class="muted small">Velg bygg først.</p>'}
+    </section>`;
+  }
   { const ln = (S.settings.notes[ins.templateId] || '').trim(); if (ln) h += `<section class="panel lnote"><h3 class="h3">Koder og notater (kun på denne telefonen)</h3><p>${esc(ln)}</p></section>`; }
   for (const sec of tpl.sections) {
     if (!secVisible(sec, ins)) continue;
@@ -806,7 +822,7 @@ function renderIns() {
     h += `<p class="warn-text">${st.unanswered} ${st.unanswered === 1 ? 'punkt er' : 'punkter er'} ikke besvart. Vil du fullføre likevel?</p>
       <div class="row-btns"><button class="btn" data-act="finish-cancel">Gå tilbake</button><button class="btn primary" data-act="finish-force">Fullfør likevel</button></div>`;
   } else {
-    h += `<button class="btn primary big" data-act="${ins.status === 'complete' ? 'pdf' : 'finish'}" data-id="${ins.id}" ${S.busy ? 'disabled' : ''}>${S.busy ? 'Lager PDF…' : ins.status === 'complete' ? 'Lag PDF på nytt' : 'Fullfør og lag PDF'}</button>`;
+    h += `<button class="btn primary big" data-act="${ins.status === 'complete' ? 'pdf' : 'finish'}" data-id="${ins.id}" ${S.busy ? 'disabled' : ''}>${S.busy ? 'Lager PDF…' : ins.status === 'complete' ? 'Lag PDF på nytt' : ins.templateId === 'avvik' ? 'Send avvik' : 'Fullfør og lag PDF'}</button>`;
   }
   h += '</section>';
   return h;
@@ -916,7 +932,9 @@ document.addEventListener('click', async e => {
       location.reload(); break;
     case 'anl': openAnl(b.dataset.id); break;
     case 'site': openSite(b.dataset.id); break;
-    case 'avvik': newAvvik(b.dataset.id); break;
+    case 'avvik': newAvvik({ anl: b.dataset.id }); break;
+    case 'avvik-new': newAvvik({ site: b.dataset.site }); break;
+    case 'av-site': if (ins) { ins.siteId = b.dataset.id; ins.anl = null; ins.annet = false; S.settings.lastSite = ins.siteId; saveSettings(); avSite(ins); touch(ins); render(); } break;
     case 'to-site': openSite(S.site); break;
     case 'settings': S.showSettings = !S.showSettings; render(); break;
     case 'new': newInspection(b.dataset.tpl); break;
@@ -963,7 +981,11 @@ document.addEventListener('click', async e => {
       ins.repeats[sec.id] = n - 1; touch(ins); render(); break;
     }
     case 'finish': {
-      if (ins.templateId === 'avvik' && !Object.values(ins.answers).some(z => (z.actions || []).some(q => (q.text || '').trim()))) { toast('Skriv hva som må gjøres i handlingen før du fullfører.', 4000); break; }
+      if (ins.templateId === 'avvik') {
+        const miss = !ins.siteId ? 'Velg bygg.' : !ins.anl && !ins.annet ? 'Velg anlegg, eller Annet.' : ins.annet && !(ins.where || '').trim() ? 'Skriv hvor avviket er.' : !Object.values(ins.answers).some(z => (z.actions || []).some(q => (q.text || '').trim())) ? 'Skriv hva som må gjøres i handlingen.' : '';
+        if (miss) { toast(miss, 4000); break; }
+        S.settings.lastSite = ins.siteId; saveSettings();
+      }
       const st = stats(ins);
       if (st.unanswered && !S.confirmFinish) { S.confirmFinish = true; render(); break; }
       await finish(ins); break;
@@ -997,6 +1019,10 @@ document.addEventListener('input', e => {
   if (el.dataset.lnote) { S.settings.notes[el.dataset.lnote] = el.value; saveSettings(); return; }
   if (el.dataset.set) { S.settings[el.dataset.set] = el.value; saveSettings(); return; }
   if (!ins) return;
+  if (el.dataset.avf) {
+    if (el.dataset.avf === 'anl') { ins.annet = el.value === 'annet'; ins.anl = ins.annet || !el.value ? null : el.value; } else ins.where = el.value;
+    avSite(ins); touch(ins); return;
+  }
   if (el.dataset.meta) { ins[el.dataset.meta] = el.value; touch(ins); return; }
   if (el.dataset.bind) {
     const a = A(ins, el.dataset.bind);
@@ -1022,7 +1048,7 @@ document.addEventListener('change', e => {
     const [key, id] = el.dataset.actf.split('|');
     const act = (ins.answers[key]?.actions || []).find(x => x.id === id);
     if (act) { act.done = el.checked; touch(ins); render(); }
-  } else if (el.dataset.rerender) render();
+  } else if (el.dataset.rerender || el.dataset.avf === 'anl') render();
 });
 
 /* ---------- Bilder ---------- */
@@ -1118,6 +1144,7 @@ async function finish(ins) {
   if (nAuto) toast(`${nAuto} ${nAuto === 1 ? 'påminnelse' : 'påminnelser'} om utløp/kontroll lagt til`, 4000);
   ins.status = 'complete'; ins.completedAt = Date.now(); S.confirmFinish = false;
   touch(ins); await flush(ins.id);
+  if (ins.templateId === 'avvik') { goHome(); toast(trelloCfg() && navigator.onLine ? 'Avviket er registrert og sendes til Trello' : 'Avviket er registrert. Det sendes til Trello når du har dekning.', 3500); return; }
   syncTrello();
   await makePdf(ins);
 }
@@ -1239,6 +1266,25 @@ async function buildReport(ins) {
     itemBlock(x);
   }
 
+  // Avvik meldt siden forrige runde
+  if (tpl.id !== 'avvik') {
+    const sites = SITES.filter(x => x.tpls.includes(tpl.id)).map(x => x.id);
+    const covered = new Set(ANLEGG.filter(a => a.cov.some(c => c.t === tpl.id)).map(a => a.id));
+    const prev = Object.values(S.ins).filter(i => i.templateId === tpl.id && i.status === 'complete' && i.id !== ins.id && (i.date || '') <= (ins.date || ''))
+      .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0))[0];
+    const after = prev ? (prev.completedAt || parseISO(prev.date).getTime()) : 0, until = ins.completedAt || Date.now();
+    const av = Object.values(S.ins).filter(i => i.templateId === 'avvik' && i.status === 'complete' && sites.includes(i.siteId || ANL[i.anl]?.site)
+      && (i.annet || covered.has(i.anl)) && (i.completedAt || 0) > after && (i.completedAt || 0) <= until).sort((a, b) => (a.completedAt || 0) - (b.completedAt || 0));
+    if (av.length) {
+      secHeader('Avvik meldt siden forrige runde', `${av.length} ${av.length === 1 ? 'avviksmelding' : 'avviksmeldinger'}${prev ? ' etter ' + fmt(prev.date) : ''}`);
+      for (const i of av) {
+        need(14);
+        d.text(`${fmt(i.date)} · ${i.anl && ANL[i.anl] ? ANL[i.anl].name : 'Annet'}${(i.where || '').trim() ? ' · ' + i.where.trim() : ''} · meldt av ${i.by || '-'}`, M + 2, y + 4, { size: 8, color: C.muted }); y += 5.5;
+        for (const a of Object.values(i.answers)) for (const act of a.actions || []) actBlock(act);
+      }
+    }
+  }
+
   // Alle seksjoner
   let last = null;
   for (const x of items) {
@@ -1342,7 +1388,8 @@ function cardDesc(ins, tpl, key, a, act) {
   const L = [];
   if ((act.text || '').includes('\n')) L.push(act.text.trim(), '');
   L.push(`**Sjekkliste:** ${tpl.name}`, `**Sted:** ${ins.site}`, `**Dato:** ${fmt(ins.date)}`);
-  if (ins.anl && ANL[ins.anl]) L.push(`**Anlegg:** ${ANL[ins.anl].name}`);
+  if (ins.anl && ANL[ins.anl]) L.push(`**Anlegg:** ${ANL[ins.anl].name}`); else if (ins.annet) L.push('**Anlegg:** Annet');
+  if ((ins.where || '').trim()) L.push(`**Hvor:** ${ins.where.trim()}`);
   L.push(`**Punkt:** ${sec ? sec.title + (sec.repeat ? ' – ' + sec.unit + ' ' + (inst + 1) : '') : ''}${it ? ' › ' + it.label : ''}`);
   if (val !== '') L.push(`**Svar:** ${val}`);
   if (a.note) L.push(`**Notat:** ${a.note}`);
@@ -1415,7 +1462,8 @@ async function syncTrello(manual) {
       if (Array.isArray(cards)) {
         const byId = Object.fromEntries(cards.map(c => [c.id, c]));
         for (const { ins, act } of tracked) {
-          const c = byId[act.trello.id];
+          let c = byId[act.trello.id];
+          if (!c) { try { c = await tfetch('GET', `cards/${act.trello.id}`, { fields: 'closed,dueComplete' }); } catch (e) { if (e.status !== 404) continue; c = null; } }
           if (!c || c.closed || c.dueComplete) { act.done = true; act.doneAt = todayISO(); act.closedIn = !c ? 'Trello (kortet er slettet)' : c.closed ? 'Trello (arkivert)' : 'Trello'; act.trello.done = true; closed++; await saveIns(ins); }
         }
       }
