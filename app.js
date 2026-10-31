@@ -275,7 +275,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-10-31 b';
+const APP_VERSION = '2026-10-31 c';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -324,6 +324,7 @@ const S = {
   pickKey: null, ready_file: null, confirmFinish: false, showAllHist: false, showSettings: false, busy: false,
 };
 try { Object.assign(S.settings, JSON.parse(localStorage.getItem('insp-settings') || '{}')); } catch (e) {}
+S.settings.notes = S.settings.notes || {};
 const saveSettings = () => { try { localStorage.setItem('insp-settings', JSON.stringify(S.settings)); } catch (e) {} };
 
 const timers = {}; const chains = {};
@@ -480,6 +481,9 @@ function renderHome() {
     h += `<section class="panel settings"><h2 class="h2">Innstillinger</h2>
       <label class="fld"><span>Ditt navn (utført av, ansvarlig)</span><input id="set-by" data-set="by" value="${esc(S.settings.by)}"></label>
       <label class="fld"><span>Firmanavn i rapporter</span><input id="set-co" data-set="company" value="${esc(S.settings.company)}"></label>
+      <h3 class="h3">Koder og lokale notater</h3>
+      <p class="muted small">Lagres bare på denne telefonen. Vises øverst i sjekklisten, men kommer ikke med i PDF-en. Er med i sikkerhetskopien, så oppbevar den privat.</p>
+      ${TEMPLATES.map(t => `<label class="fld"><span>${esc(t.name)}</span><textarea class="inp" id="ln-${t.id}" rows="2" data-lnote="${t.id}">${esc(S.settings.notes[t.id] || '')}</textarea></label>`).join('')}
       <p class="muted small">Argus, versjon ${APP_VERSION}</p>
       <h3 class="h3">Sikkerhetskopi</h3>
       <p class="muted small">Alt ligger bare på denne telefonen. Ta en kopi jevnlig og legg den i iCloud Drive eller Google Drive.</p>
@@ -542,6 +546,7 @@ function renderIns() {
       <label class="fld"><span>Dato</span><input id="m-date" type="date" data-meta="date" value="${esc(ins.date)}"></label>
       <label class="fld"><span>Utført av</span><input id="m-by" data-meta="by" value="${esc(ins.by)}"></label>
     </div></section>`;
+  { const ln = (S.settings.notes[ins.templateId] || '').trim(); if (ln) h += `<section class="panel lnote"><h3 class="h3">Koder og notater (kun på denne telefonen)</h3><p>${esc(ln)}</p></section>`; }
   for (const sec of tpl.sections) {
     if (!secVisible(sec, ins)) continue;
     const n = instCount(sec, ins);
@@ -725,6 +730,7 @@ function arm(b, label) {
 
 document.addEventListener('input', e => {
   const el = e.target; const ins = cur();
+  if (el.dataset.lnote) { S.settings.notes[el.dataset.lnote] = el.value; saveSettings(); return; }
   if (el.dataset.set) { S.settings[el.dataset.set] = el.value; saveSettings(); return; }
   if (!ins) return;
   if (el.dataset.meta) { ins[el.dataset.meta] = el.value; touch(ins); return; }
@@ -1000,6 +1006,7 @@ $('#importpick').addEventListener('change', async e => {
     const data = JSON.parse(await f.text());
     if (data.app !== 'oseberg-inspeksjon') throw new Error('Filen er ikke en sikkerhetskopi fra denne appen.');
     let added = 0;
+    if (data.settings && data.settings.notes) { S.settings.notes = { ...data.settings.notes, ...S.settings.notes }; saveSettings(); }
     for (const p of data.photos || []) {
       const bin = Uint8Array.from(atob(p.data), c => c.charCodeAt(0));
       await DB.put('photos', { id: p.id, w: p.w, h: p.h, blob: new Blob([bin], { type: 'image/jpeg' }) });
