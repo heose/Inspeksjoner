@@ -278,7 +278,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-10-31 e';
+const APP_VERSION = '2026-10-31 f';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -741,7 +741,7 @@ document.addEventListener('click', async e => {
       window.open('https://trello.com/1/authorize?expiration=never&scope=read,write&response_type=token&name=Argus&key=' + encodeURIComponent(k), '_blank'); break;
     }
     case 'tr-test':
-      try { const bd = await tfetch('GET', `boards/${TRELLO.board}`, { fields: 'name' }); S.settings.trello.members = null; await trelloMembers(); toast(`Koblet til tavlen «${bd.name}»`, 4000); }
+      try { const bd = await tfetch('GET', `boards/${TRELLO.board}`, { fields: 'name' }); S.settings.trello.members = null; await trelloMembers(); S.settings.trello.labels = {}; let lab = 'etiketter klare'; try { for (const k of Object.keys(PRIO_LABEL)) await prioLabel(k); } catch (e) { lab = 'etiketter feilet: ' + trelloErr(e); } toast(`Koblet til tavlen «${bd.name}», ${lab}`, 6000); }
       catch (e) { toast(trelloErr(e), 8000); }
       break;
     case 'tr-sync': await syncTrello(true); break;
@@ -1098,7 +1098,7 @@ async function prioLabel(prio) {
 }
 async function sendCard(ins, tpl, key, a, act, listId) {
   const members = await trelloMembers().catch(() => []);
-  const lab = await prioLabel(act.prio).catch(() => null);
+  const lab = await prioLabel(act.prio).catch(e => { toast('Prioritetsetikett feilet: ' + trelloErr(e), 6000); return null; });
   const mem = findMember(members, act.who);
   const params = { idList: listId, name: (act.text || '').trim().split('\n')[0].slice(0, 150), desc: cardDesc(ins, tpl, key, a, act), pos: 'top' };
   if (act.due) params.due = new Date(parseISO(act.due).getTime() + 12 * 36e5).toISOString();
