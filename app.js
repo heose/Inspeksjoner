@@ -264,6 +264,9 @@ const TEMPLATES = [
 ];
 const ORDER = ['internkontroll', 'sprinkel_op', 'kloakk', 'op_ukentlig', 'sprinkel_vk', 'vk_ukentlig', 'vernerunde', 'vernerunde_halvar', 'sprinkel_tb'];
 TEMPLATES.sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
+const TRELLO = { board: '69fd92b5f73c4c4645f0a9b2', lists: { olsrod: '69fd92efa0fbbbd4a10fc0ee', vk: '69fd92f5a4757aaa7dcfef02', svk: '6ae5a990f8db6f1ba0c7970f', tb: '6ae5a995305871414c09e581' } };
+const TLIST = { internkontroll: 'olsrod', sprinkel_op: 'olsrod', kloakk: 'olsrod', op_ukentlig: 'olsrod', sprinkel_vk: 'vk', vk_ukentlig: 'vk', vernerunde_halvar: 'vk', vernerunde: 'svk', sprinkel_tb: 'tb' };
+TEMPLATES.forEach(t => { t.tl = TLIST[t.id]; });
 const TPL = Object.fromEntries(TEMPLATES.map(t => [t.id, t]));
 const TYPES = {
   ok:  { opts: ['Ok', 'Ikke OK', 'N/A'], flag: ['Ikke OK'] },
@@ -275,7 +278,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-10-31 c';
+const APP_VERSION = '2026-10-31 d';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -325,6 +328,7 @@ const S = {
 };
 try { Object.assign(S.settings, JSON.parse(localStorage.getItem('insp-settings') || '{}')); } catch (e) {}
 S.settings.notes = S.settings.notes || {};
+S.settings.trello = S.settings.trello || {};
 const saveSettings = () => { try { localStorage.setItem('insp-settings', JSON.stringify(S.settings)); } catch (e) {} };
 
 const timers = {}; const chains = {};
@@ -442,7 +446,7 @@ function newInspection(tid) {
   openIns(ins.id);
 }
 function openIns(id) { S.cur = id; S.view = 'ins'; S.confirmFinish = false; render(); window.scrollTo(0, 0); }
-function goHome() { flushAll(); S.view = 'home'; S.cur = null; render(); window.scrollTo(0, 0); }
+function goHome() { flushAll(); syncTrello(); S.view = 'home'; S.cur = null; render(); window.scrollTo(0, 0); }
 
 /* ---------- Visning ---------- */
 const app = $('#app');
@@ -481,6 +485,18 @@ function renderHome() {
     h += `<section class="panel settings"><h2 class="h2">Innstillinger</h2>
       <label class="fld"><span>Ditt navn (utført av, ansvarlig)</span><input id="set-by" data-set="by" value="${esc(S.settings.by)}"></label>
       <label class="fld"><span>Firmanavn i rapporter</span><input id="set-co" data-set="company" value="${esc(S.settings.company)}"></label>
+      <h3 class="h3">Trello</h3>
+      <p class="muted small">Handlinger fra fullførte inspeksjoner sendes som kort til tavlen Vaktmester, i listen for riktig bygg. Nøkkel og token lagres bare på denne telefonen og tas ikke med i sikkerhetskopien.</p>
+      <label class="fld"><span>API-nøkkel</span><input id="tr-key" data-trello="key" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(S.settings.trello.key || '')}"></label>
+      <label class="fld"><span>Token</span><input id="tr-token" type="password" data-trello="token" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(S.settings.trello.token || '')}"></label>
+      <div class="row-btns"><button class="btn" data-act="tr-token">Hent token</button><button class="btn" data-act="tr-test">Test tilkobling</button></div>
+      <p class="muted small">${trelloCfg() ? trelloPending().n + ' handlinger venter på sending.' : 'Ikke koblet til ennå.'}</p>
+      <details class="how"><summary>Slik får du nøkkel og token</summary><ol>
+        <li>Åpne <a href="https://trello.com/power-ups/admin" target="_blank" rel="noopener">trello.com/power-ups/admin</a> og velg Create new Power-Up. Navn: Argus. Velg arbeidsområdet ditt og fyll inn e-post. Feltet for iframe-adresse kan stå tomt.</li>
+        <li>Åpne Power-Up-en, velg API key og trykk Generate a new API key. Kopier nøkkelen hit.</li>
+        <li>Under Allowed origins legger du til <b>https://heose.github.io</b> og lagrer.</li>
+        <li>Trykk Hent token her, trykk Allow i Trello, og kopier token-teksten hit.</li>
+      </ol></details>
       <h3 class="h3">Koder og lokale notater</h3>
       <p class="muted small">Lagres bare på denne telefonen. Vises øverst i sjekklisten, men kommer ikke med i PDF-en. Er med i sikkerhetskopien, så oppbevar den privat.</p>
       ${TEMPLATES.map(t => `<label class="fld"><span>${esc(t.name)}</span><textarea class="inp" id="ln-${t.id}" rows="2" data-lnote="${t.id}">${esc(S.settings.notes[t.id] || '')}</textarea></label>`).join('')}
@@ -514,6 +530,7 @@ function renderHome() {
   for (const i of all) for (const [key, a] of Object.entries(i.answers)) for (const act of a.actions || []) if (!act.done) open.push({ i, key, act });
   open.sort((x, y) => (x.act.due || '9').localeCompare(y.act.due || '9'));
   h += `<section><h2 class="h2">Åpne handlinger <span class="count">${open.length}</span></h2>`;
+  h += trelloHomeLine();
   h += open.length ? `<div class="list">${open.map(({ i, key, act }) => {
     const t = TPL[i.templateId]; const late = act.due && act.due < todayISO();
     return `<div class="act-line"><input type="checkbox" id="hd-${act.id}" data-hdone="${i.id}|${esc(key)}|${act.id}" aria-label="Merk som utført">
@@ -530,7 +547,7 @@ function renderHome() {
     return `<div class="row-card"><button class="row-main" data-act="open" data-id="${i.id}">
       <span class="rc-title">${esc(t.name)}</span><span class="rc-sub">${esc(i.site)} · ${fmt(i.date)}</span>
       <span class="rc-sub">${st.flags ? `<b class="t-bad">${st.flags} avvik</b>` : 'Ingen avvik'} · ${st.actions} handlinger</span></button>
-      <button class="link" data-act="pdf" data-id="${i.id}">PDF</button></div>`;
+      <button class="link" data-act="pdf" data-id="${i.id}">PDF</button><button class="link danger" data-act="del-ins" data-id="${i.id}">Slett</button></div>`;
   }).join('')}</div>${done.length > 8 && !S.showAllHist ? `<button class="link more" data-act="hist-all">Vis alle ${done.length}</button>` : ''}` : '<p class="empty">Fullførte inspeksjoner havner her.</p>';
   h += '</section>';
   return h;
@@ -601,7 +618,7 @@ function itemHTML(ins, it, key) {
   }
   const note = a.note != null ? `<textarea class="inp note" id="nt-${k}" rows="2" data-bind="${k}" data-field="note" placeholder="Notat">${esc(a.note)}</textarea>` : '';
   const thumbs = photos.length ? `<div class="thumbs">${photos.map((pid, ix) => `<button type="button" class="thumb" data-act="thumb" data-key="${k}" data-ix="${ix}" aria-label="Åpne bilde ${ix + 1}"><img data-pid="${pid}" alt=""></button>`).join('')}</div>` : '';
-  const actsH = acts.map(act => actHTML(key, act)).join('');
+  const actsH = acts.map(act => actHTML(key, act, ins.status === 'complete')).join('');
   return `<div class="item${flag ? ' is-flag' : ''}" id="it-${k}">
     <div class="q">${esc(it.label)}</div>${it.help ? `<div class="help">${esc(it.help)}</div>` : ''}
     ${ctl}${note}${thumbs}${actsH}
@@ -611,10 +628,10 @@ function itemHTML(ins, it, key) {
       <button type="button" class="tool${want && !acts.length ? ' prompt' : ''}" data-act="act-add" data-key="${k}">+ Handling</button>
     </div></div>`;
 }
-function actHTML(key, act) {
+function actHTML(key, act, sent) {
   const k = esc(key), base = `${k}|${act.id}`;
   return `<div class="act${act.done ? ' done' : ''}">
-    <div class="act-h"><span class="act-tag">Handling</span><label class="chk"><input type="checkbox" id="ad-${act.id}" data-actf="${base}|done"${act.done ? ' checked' : ''}> Utført</label></div>
+    <div class="act-h"><span class="act-tag">Handling</span>${trTag(act, sent)}<label class="chk"><input type="checkbox" id="ad-${act.id}" data-actf="${base}|done"${act.done ? ' checked' : ''}> Utført</label></div>
     <textarea class="inp" id="at-${act.id}" rows="2" data-actf="${base}|text" placeholder="Hva skal gjøres?">${esc(act.text)}</textarea>
     <div class="act-row">
       <label class="fld"><span>Frist</span><input type="date" id="af-${act.id}" data-actf="${base}|due" value="${esc(act.due || '')}"></label>
@@ -719,6 +736,15 @@ document.addEventListener('click', async e => {
     case 'pdf': await makePdf(S.ins[b.dataset.id]); break;
     case 'share-file': shareFile(); break;
     case 'close-sheet': S.ready_file = null; renderSheet(); break;
+    case 'tr-token': {
+      const k = S.settings.trello.key; if (!k) { toast('Lim inn API-nøkkelen først.'); break; }
+      window.open('https://trello.com/1/authorize?expiration=never&scope=read,write&response_type=token&name=Argus&key=' + encodeURIComponent(k), '_blank'); break;
+    }
+    case 'tr-test':
+      try { const bd = await tfetch('GET', `boards/${TRELLO.board}`, { fields: 'name' }); S.settings.trello.members = null; await trelloMembers(); toast(`Koblet til tavlen «${bd.name}»`, 4000); }
+      catch (e) { toast(trelloErr(e), 8000); }
+      break;
+    case 'tr-sync': await syncTrello(true); break;
     case 'export': await exportBackup(); break;
     case 'import': $('#importpick').click(); break;
   }
@@ -730,6 +756,7 @@ function arm(b, label) {
 
 document.addEventListener('input', e => {
   const el = e.target; const ins = cur();
+  if (el.dataset.trello) { const t = S.settings.trello; t[el.dataset.trello] = el.value.trim(); t.members = null; saveSettings(); return; }
   if (el.dataset.lnote) { S.settings.notes[el.dataset.lnote] = el.value; saveSettings(); return; }
   if (el.dataset.set) { S.settings[el.dataset.set] = el.value; saveSettings(); return; }
   if (!ins) return;
@@ -750,7 +777,7 @@ document.addEventListener('change', e => {
   if (el.dataset.hdone) {
     const [iid, key, id] = el.dataset.hdone.split('|'); const i = S.ins[iid];
     const act = (i?.answers[key]?.actions || []).find(x => x.id === id);
-    if (act) { act.done = el.checked; touch(i); toast('Handlingen er merket som utført'); setTimeout(render, 350); }
+    if (act) { act.done = el.checked; touch(i); toast('Handlingen er merket som utført'); setTimeout(render, 350); setTimeout(syncTrello, 1200); }
     return;
   }
   if (!ins) return;
@@ -829,6 +856,7 @@ $('#ed-del').onclick = async () => {
 async function finish(ins) {
   ins.status = 'complete'; ins.completedAt = Date.now(); S.confirmFinish = false;
   touch(ins); await flush(ins.id);
+  syncTrello();
   await makePdf(ins);
 }
 async function makePdf(ins) {
@@ -995,7 +1023,7 @@ async function exportBackup() {
   await flushAll();
   const photos = [];
   for (const p of await DB.all('photos')) photos.push({ id: p.id, w: p.w, h: p.h, data: await blobToB64(p.blob) });
-  const data = { app: 'oseberg-inspeksjon', version: 1, exportedAt: new Date().toISOString(), settings: S.settings, inspections: await DB.all('inspections'), photos };
+  const data = { app: 'oseberg-inspeksjon', version: 1, exportedAt: new Date().toISOString(), settings: { ...S.settings, trello: undefined }, inspections: await DB.all('inspections'), photos };
   const file = new File([JSON.stringify(data)], `inspeksjoner-sikkerhetskopi-${todayISO()}.json`, { type: 'application/json' });
   S.ready_file = { file, title: 'Sikkerhetskopien er klar' };
   $('#toast').hidden = true; renderSheet();
@@ -1019,6 +1047,110 @@ $('#importpick').addEventListener('change', async e => {
   } catch (err) { toast('Kunne ikke gjenopprette: ' + err.message, 5000); }
 });
 
+/* ---------- Trello ---------- */
+const trelloCfg = () => { const t = S.settings.trello || {}; return t.key && t.token ? t : null; };
+async function tfetch(method, path, params = {}, body) {
+  const cfg = trelloCfg(); if (!cfg) throw new Error('Ikke koblet til Trello');
+  const q = new URLSearchParams({ ...params, key: cfg.key, token: cfg.token }).toString();
+  const r = await fetch(`https://api.trello.com/1/${path}?${q}`, { method, body });
+  if (!r.ok) { const e = new Error('Trello ' + r.status); e.status = r.status; e.body = (await r.text().catch(() => '')).slice(0, 160); throw e; }
+  return r.json();
+}
+function trelloErr(e) {
+  if (e.status === 401) return 'Trello avviste nøkkel eller token. Sjekk at begge er limt inn riktig, uten mellomrom.';
+  if (e.status === 404) return 'Trello finner ikke tavlen Vaktmester. Har kontoen din tilgang?';
+  if (e.status) return `Trello ga feil ${e.status}. ${e.body || ''}`;
+  return navigator.onLine ? 'Fikk ikke kontakt med Trello. Sjekk at https://heose.github.io er lagt til under Allowed origins for API-nøkkelen.' : 'Ingen nett. Handlingene sendes når du har dekning igjen.';
+}
+async function trelloMembers() {
+  const t = S.settings.trello;
+  if (t.members && Date.now() - (t.membersAt || 0) < 7 * 864e5) return t.members;
+  t.members = await tfetch('GET', `boards/${TRELLO.board}/members`, { fields: 'fullName,username' });
+  t.membersAt = Date.now(); saveSettings(); return t.members;
+}
+const nrm = s => String(s || '').trim().toLowerCase();
+function findMember(list, who) {
+  const w = nrm(who); if (!w) return null;
+  return list.find(m => nrm(m.fullName) === w || nrm(m.username) === w) || list.find(m => nrm(m.fullName).split(' ')[0] === w) || null;
+}
+function cardDesc(ins, tpl, key, a, act) {
+  const { sec, it, inst } = findItem(tpl, key);
+  const val = Array.isArray(a.value) ? a.value.join(', ') : (a.value ?? '');
+  const L = [];
+  if ((act.text || '').includes('\n')) L.push(act.text.trim(), '');
+  L.push(`**Sjekkliste:** ${tpl.name}`, `**Sted:** ${ins.site}`, `**Dato:** ${fmt(ins.date)}`);
+  L.push(`**Punkt:** ${sec ? sec.title + (sec.repeat ? ' – ' + sec.unit + ' ' + (inst + 1) : '') : ''}${it ? ' › ' + it.label : ''}`);
+  if (val !== '') L.push(`**Svar:** ${val}`);
+  if (a.note) L.push(`**Notat:** ${a.note}`);
+  L.push(`**Prioritet:** ${act.prio || 'Lav'}`, `**Ansvarlig:** ${act.who || '-'}`, `**Utført av:** ${ins.by}`);
+  return L.join('\n');
+}
+const saveIns = ins => { ins.updatedAt = Date.now(); scheduleSave(ins.id); return flush(ins.id); };
+async function sendCard(ins, tpl, key, a, act, listId) {
+  const members = await trelloMembers().catch(() => []);
+  const mem = findMember(members, act.who);
+  const params = { idList: listId, name: (act.text || '').trim().split('\n')[0].slice(0, 150), desc: cardDesc(ins, tpl, key, a, act), pos: 'top' };
+  if (act.due) params.due = new Date(parseISO(act.due).getTime() + 12 * 36e5).toISOString();
+  if (mem) params.idMembers = mem.id;
+  const c = await tfetch('POST', 'cards', params);
+  act.trello = { id: c.id, url: c.shortUrl || c.url, done: false, pics: 0 };
+  await saveIns(ins);
+}
+async function sendPhotos(ins, a, act) {
+  const pics = a.photos || [];
+  while (act.trello.pics < pics.length) {
+    const n = act.trello.pics, rec = await DB.get('photos', pics[n]);
+    if (rec) { const f = new FormData(); f.append('file', rec.blob, `bilde-${n + 1}.jpg`); f.append('name', `Bilde ${n + 1}`); await tfetch('POST', `cards/${act.trello.id}/attachments`, {}, f); }
+    act.trello.pics = n + 1; await saveIns(ins);
+  }
+}
+function trelloPending() {
+  let n = 0, empty = 0;
+  for (const ins of Object.values(S.ins)) {
+    if (ins.status !== 'complete') continue;
+    for (const a of Object.values(ins.answers)) for (const act of a.actions || []) {
+      if (!act.trello) { if ((act.text || '').trim()) n++; else empty++; }
+      else if (!!act.done !== !!act.trello.done || act.trello.pics < (a.photos || []).length) n++;
+    }
+  }
+  return { n, empty };
+}
+function trelloHomeLine() {
+  const { n, empty } = trelloPending();
+  if (!trelloCfg()) return Object.values(S.ins).some(i => i.status === 'complete') ? '<p class="muted small">Koble til Trello under Innstillinger for å sende handlingene automatisk.</p>' : '';
+  if (!n && !empty) return '';
+  return `<div class="tr-line"><span class="muted small">${n ? n + ' venter på sending til Trello' : ''}${empty ? (n ? ' · ' : '') + empty + ' uten tekst (sendes ikke)' : ''}</span>${n ? '<button class="link" data-act="tr-sync">Send nå</button>' : ''}</div>`;
+}
+const trTag = (act, sent) => act.trello && act.trello.id
+  ? `<a class="tr-tag" href="${esc(act.trello.url)}" target="_blank" rel="noopener">I Trello ↗</a>`
+  : (sent ? '<span class="tr-tag wait">Venter på Trello</span>' : '');
+async function syncTrello(manual) {
+  if (S.syncing) return;
+  if (!trelloCfg()) { if (manual === true) toast('Legg inn API-nøkkel og token under Innstillinger først.'); return; }
+  if (!navigator.onLine) { if (manual === true) toast('Ingen nett. Handlingene sendes når du har dekning igjen.'); return; }
+  S.syncing = true; let sent = 0, upd = 0, err = null;
+  try {
+    for (const ins of Object.values(S.ins)) {
+      if (ins.status !== 'complete') continue;
+      const tpl = TPL[ins.templateId], listId = TRELLO.lists[tpl && tpl.tl]; if (!listId) continue;
+      for (const [key, a] of Object.entries(ins.answers)) for (const act of a.actions || []) {
+        if (!act.trello) { if (!(act.text || '').trim()) continue; await sendCard(ins, tpl, key, a, act, listId); sent++; }
+        if (act.trello.pics < (a.photos || []).length) await sendPhotos(ins, a, act);
+        if (!!act.done !== !!act.trello.done) {
+          if (act.due) await tfetch('PUT', `cards/${act.trello.id}`, { dueComplete: act.done ? 'true' : 'false' });
+          act.trello.done = !!act.done; upd++; await saveIns(ins);
+        }
+      }
+    }
+  } catch (e) { err = e; }
+  S.syncing = false;
+  await flushAll();
+  if (err) { if (err.status || manual === true) toast(trelloErr(err), 7000); }
+  else if (sent) toast(`${sent} ${sent === 1 ? 'handling' : 'handlinger'} sendt til Trello`);
+  else if (manual === true) toast(upd ? 'Trello er oppdatert' : 'Ingen handlinger venter');
+  if (S.view === 'home' && !S.showSettings) render();
+}
+
 /* ---------- Oppstart ---------- */
 (async () => {
   render();
@@ -1032,4 +1164,6 @@ $('#importpick').addEventListener('change', async e => {
   }
   render();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  syncTrello();
+  window.addEventListener('online', () => syncTrello());
 })();
