@@ -279,7 +279,7 @@ TEMPLATES.push({
 });
 const ORDER = ['internkontroll', 'sprinkel_op', 'kloakk', 'op_ukentlig', 'halvar_op', 'sprinkel_vk', 'vk_ukentlig', 'vernerunde', 'vernerunde_halvar', 'sprinkel_tb'];
 TEMPLATES.sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
-const TRELLO = { board: '69fd92b5f73c4c4645f0a9b2', lists: { olsrod: '69fd92efa0fbbbd4a10fc0ee', vk: '69fd92f5a4757aaa7dcfef02', svk: '6ae5a990f8db6f1ba0c7970f', tb: '6ae5a995305871414c09e581' } };
+const TRELLO = { done: '69fd938488c9a6df080a9712', board: '69fd92b5f73c4c4645f0a9b2', lists: { olsrod: '69fd92efa0fbbbd4a10fc0ee', vk: '69fd92f5a4757aaa7dcfef02', svk: '6ae5a990f8db6f1ba0c7970f', tb: '6ae5a995305871414c09e581' } };
 const TLIST = { internkontroll: 'olsrod', sprinkel_op: 'olsrod', kloakk: 'olsrod', op_ukentlig: 'olsrod', halvar_op: 'olsrod', sprinkel_vk: 'vk', vk_ukentlig: 'vk', vernerunde_halvar: 'vk', vernerunde: 'svk', sprinkel_tb: 'tb' };
 TEMPLATES.forEach(t => { t.tl = TLIST[t.id]; });
 const listKey = (ins, key) => { const t = TPL[ins.templateId]; return ins.tl || findItem(t, key).sec?.tl || t.tl; };
@@ -363,7 +363,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-10-31 n';
+const APP_VERSION = '2026-10-31 o';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -736,7 +736,7 @@ function renderSite() {
   h += `<section><h2 class="h2">Inspeksjoner</h2><div class="tpl-list">${site.tpls.map(id => tplBtn(TPL[id])).join('')}</div></section>`;
   h += `<section><h2 class="h2">Anlegg <span class="count">${list.length}</span></h2><div class="list">${list.map(x => anlBtn(x.a, x.st)).join('')}</div></section>`;
   const open = siteOpen(site);
-  h += `<section><h2 class="h2">Åpne handlinger <span class="count">${open.length}</span></h2>`;
+  h += `<section><h2 class="h2">Åpne handlinger <span class="count">${open.length}</span></h2>${trelloHomeLine()}`;
   h += open.length ? `<div class="list">${open.map(({ i, key, act }) => {
     const t = TPL[i.templateId]; const late = act.due && act.due < todayISO();
     return `<div class="act-line"><input type="checkbox" id="hd-${act.id}" data-hdone="${i.id}|${esc(key)}|${act.id}" aria-label="Merk som utført">
@@ -1448,7 +1448,7 @@ function trelloHomeLine() {
   const { n, empty } = trelloPending();
   if (!trelloCfg()) return Object.values(S.ins).some(i => i.status === 'complete') ? '<p class="muted small">Koble til Trello under Innstillinger for å sende handlingene automatisk.</p>' : '';
   if (!n && !empty) return '';
-  return `<div class="tr-line"><span class="muted small">${n ? n + ' venter på sending til Trello' : ''}${empty ? (n ? ' · ' : '') + empty + ' uten tekst (sendes ikke)' : ''}</span>${n ? '<button class="link" data-act="tr-sync">Send nå</button>' : ''}</div>`;
+  return `${S.trErr && n ? `<p class="t-bad small">Siste forsøk feilet: ${esc(S.trErr)}</p>` : ''}<div class="tr-line"><span class="muted small">${n ? n + ' venter på sending til Trello' : ''}${empty ? (n ? ' · ' : '') + empty + ' uten tekst (sendes ikke)' : ''}</span>${n ? '<button class="link" data-act="tr-sync">Send nå</button>' : ''}</div>`;
 }
 const trTag = (act, sent) => act.trello && act.trello.id
   ? `<a class="tr-tag" href="${esc(act.trello.url)}" target="_blank" rel="noopener">${act.closedIn ? 'Lukket i ' + esc(act.closedIn) : 'I Trello'} ↗</a>`
@@ -1462,13 +1462,13 @@ async function syncTrello(manual) {
     const tracked = [];
     for (const ins of Object.values(S.ins)) for (const a of Object.values(ins.answers)) for (const act of a.actions || []) if (act.trello?.id && !act.done) tracked.push({ ins, act });
     if (tracked.length) {
-      const cards = await tfetch('GET', `boards/${TRELLO.board}/cards/all`, { fields: 'closed,dueComplete' });
+      const cards = await tfetch('GET', `boards/${TRELLO.board}/cards/all`, { fields: 'closed,dueComplete,idList' });
       if (Array.isArray(cards)) {
         const byId = Object.fromEntries(cards.map(c => [c.id, c]));
         for (const { ins, act } of tracked) {
           let c = byId[act.trello.id];
-          if (!c) { try { c = await tfetch('GET', `cards/${act.trello.id}`, { fields: 'closed,dueComplete' }); } catch (e) { if (e.status !== 404) continue; c = null; } }
-          if (!c || c.closed || c.dueComplete) { act.done = true; act.doneAt = todayISO(); act.closedIn = !c ? 'Trello (kortet er slettet)' : c.closed ? 'Trello (arkivert)' : 'Trello'; act.trello.done = true; closed++; await saveIns(ins); }
+          if (!c) { try { c = await tfetch('GET', `cards/${act.trello.id}`, { fields: 'closed,dueComplete,idList' }); } catch (e) { if (e.status !== 404) continue; c = null; } }
+          if (!c || c.closed || c.dueComplete || c.idList === TRELLO.done) { act.done = true; act.doneAt = todayISO(); act.closedIn = !c ? 'Trello (kortet er slettet)' : c.closed ? 'Trello (arkivert)' : c.idList === TRELLO.done ? 'Trello (Ferdig)' : 'Trello'; act.trello.done = true; closed++; await saveIns(ins); }
         }
       }
     }
@@ -1489,7 +1489,8 @@ async function syncTrello(manual) {
   } catch (e) { err = e; }
   S.syncing = false;
   await flushAll();
-  if (err) { if (err.status || manual === true) toast(trelloErr(err), 7000); }
+  S.trErr = err ? (err.status || /fetch|load failed|network/i.test(err.message || '') ? trelloErr(err) : 'Feil i appen: ' + (err.message || err)) : null;
+  if (err) { console.error(err); if (err.status || manual === true) toast(S.trErr, 8000); }
   else if (sent || closed) toast([sent ? `${sent} ${sent === 1 ? 'handling' : 'handlinger'} sendt til Trello` : '', closed ? `${closed} lukket i Trello` : ''].filter(Boolean).join(' · '));
   else if (manual === true) toast(upd ? 'Trello er oppdatert' : 'Ingen handlinger venter');
   if (S.view !== 'ins' && !S.showSettings) render();
