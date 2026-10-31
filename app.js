@@ -355,7 +355,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-10-31 g';
+const APP_VERSION = '2026-10-31 h';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -634,6 +634,7 @@ function renderHome() {
       <p class="muted small">Lagres bare på denne telefonen. Vises øverst i sjekklisten, men kommer ikke med i PDF-en. Er med i sikkerhetskopien, så oppbevar den privat.</p>
       ${TEMPLATES.map(t => `<label class="fld"><span>${esc(t.name)}</span><textarea class="inp" id="ln-${t.id}" rows="2" data-lnote="${t.id}">${esc(S.settings.notes[t.id] || '')}</textarea></label>`).join('')}
       <p class="muted small">Argus, versjon ${APP_VERSION}</p>
+      <div class="row-btns"><button class="btn" data-act="force-update">Hent nyeste versjon</button></div>
       <h3 class="h3">Sikkerhetskopi</h3>
       <p class="muted small">Alt ligger bare på denne telefonen. Ta en kopi jevnlig og legg den i iCloud Drive eller Google Drive.</p>
       <div class="row-btns"><button class="btn" data-act="export">Lag sikkerhetskopi</button><button class="btn" data-act="import">Gjenopprett fra fil</button></div>
@@ -858,6 +859,11 @@ document.addEventListener('click', async e => {
   switch (act) {
     case 'home': goHome(); break;
     case 'home-root': goHome(true); break;
+    case 'force-update':
+      if (!b.dataset.armed) { arm(b, 'Trykk igjen for å laste på nytt'); break; }
+      await flushAll();
+      try { for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); for (const k of await caches.keys()) await caches.delete(k); } catch (e) {}
+      location.reload(); break;
     case 'anl': openAnl(b.dataset.id); break;
     case 'settings': S.showSettings = !S.showSettings; render(); break;
     case 'new': newInspection(b.dataset.tpl); break;
@@ -1356,7 +1362,11 @@ async function syncTrello(manual) {
     S.error = 'Lagringen på enheten er ikke tilgjengelig. Privat nettlesing blokkerer den; åpne appen fra hjemskjermen.';
   }
   render();
-  if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    const had = !!navigator.serviceWorker.controller; let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (had && !reloaded && S.view !== 'ins') { reloaded = true; location.reload(); } });
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => r.update()).catch(() => {});
+  }
   syncTrello();
   window.addEventListener('online', () => syncTrello());
 })();
