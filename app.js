@@ -363,7 +363,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-10-31 q';
+const APP_VERSION = '2026-11-01 r';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -655,7 +655,9 @@ function renderHome() {
       <label class="fld"><span>Ditt navn (utført av, ansvarlig)</span><input id="set-by" data-set="by" value="${esc(S.settings.by)}"></label>
       <label class="fld"><span>Firmanavn i rapporter</span><input id="set-co" data-set="company" value="${esc(S.settings.company)}"></label>
       <h3 class="h3">Trello</h3>
-      <p class="muted small">Handlinger fra fullførte inspeksjoner sendes som kort til tavlen Vaktmester, i listen for riktig bygg. Nøkkel og token lagres bare på denne telefonen og tas ikke med i sikkerhetskopien.</p>
+      ${hubCfg() ? `<p class="muted small">Trello går via Argus Hub, så du trenger ikke nøkkel eller token her. Handlinger fra fullførte inspeksjoner sendes som kort til tavlen Vaktmester, i listen for riktig bygg.</p>
+      <div class="row-btns"><button class="btn" data-act="tr-test">Test tilkobling</button></div>
+      <p class="muted small">${trelloPending().n} handlinger venter på sending.</p>` : `<p class="muted small">Handlinger fra fullførte inspeksjoner sendes som kort til tavlen Vaktmester, i listen for riktig bygg. Nøkkel og token lagres bare på denne telefonen og tas ikke med i sikkerhetskopien.</p>
       <label class="fld"><span>API-nøkkel</span><input id="tr-key" data-trello="key" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(S.settings.trello.key || '')}"></label>
       <label class="fld"><span>Token</span><input id="tr-token" type="password" data-trello="token" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(S.settings.trello.token || '')}"></label>
       <div class="row-btns"><button class="btn" data-act="tr-token">Hent token</button><button class="btn" data-act="tr-test">Test tilkobling</button></div>
@@ -665,7 +667,7 @@ function renderHome() {
         <li>Åpne Power-Up-en, velg API key og trykk Generate a new API key. Kopier nøkkelen hit.</li>
         <li>Under Allowed origins legger du til <b>https://heose.github.io</b> og lagrer.</li>
         <li>Trykk Hent token her, trykk Allow i Trello, og kopier token-teksten hit.</li>
-      </ol></details>
+      </ol></details>`}
       <h3 class="h3">Argus Hub</h3>
       <p class="muted small">Delt logg over fullførte inspeksjoner og PDF-rapporter. Samme adresse og kode brukes på alle enheter. Lagres bare på denne telefonen og tas ikke med i sikkerhetskopien.</p>
       <label class="fld"><span>Hub-adresse</span><input id="hub-url" data-hub="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://argus-hub.navn.workers.dev" value="${esc(S.settings.hub.url || '')}"></label>
@@ -1377,15 +1379,25 @@ $('#importpick').addEventListener('change', async e => {
 });
 
 /* ---------- Trello ---------- */
-const trelloCfg = () => { const t = S.settings.trello || {}; return t.key && t.token ? t : null; };
+// Når Hub er satt opp går Trello-kall via Hub (nøkkel og token ligger der). Ellers brukes nøkkel og token fra Innstillinger.
+const trelloCfg = () => { if (hubCfg()) return { hub: true }; const t = S.settings.trello || {}; return t.key && t.token ? t : null; };
 async function tfetch(method, path, params = {}, body) {
   const cfg = trelloCfg(); if (!cfg) throw new Error('Ikke koblet til Trello');
-  const q = new URLSearchParams({ ...params, key: cfg.key, token: cfg.token }).toString();
-  const r = await fetch(`https://api.trello.com/1/${path}?${q}`, { method, body });
+  let r;
+  if (cfg.hub) { const h = hubCfg(); r = await fetch(`${h.url}/trello/${path}?${new URLSearchParams(params)}`, { method, body, headers: { 'x-argus-code': h.code } }); }
+  else r = await fetch(`https://api.trello.com/1/${path}?${new URLSearchParams({ ...params, key: cfg.key, token: cfg.token })}`, { method, body });
   if (!r.ok) { const e = new Error('Trello ' + r.status); e.status = r.status; e.body = (await r.text().catch(() => '')).slice(0, 160); throw e; }
   return r.json();
 }
 function trelloErr(e) {
+  if (hubCfg()) {
+    if (e.status === 401 && /kode/i.test(e.body || '')) return 'Hub avviste koden. Sjekk Hub-koden under Innstillinger.';
+    if (e.status === 401) return 'Trello avviste token som ligger i Hub. Hent nytt token og oppdater secret TRELLO_TOKEN i Cloudflare.';
+    if (e.status === 500 && /Trello er ikke/.test(e.body || '')) return 'Trello er ikke satt opp i Hub. Legg inn secrets TRELLO_KEY og TRELLO_TOKEN i Cloudflare.';
+    if (e.status === 403) return 'Hub tillater ikke dette Trello-kallet. Er worker.js oppdatert?';
+    if (e.status) return `Trello via Hub ga feil ${e.status}. ${e.body || ''}`;
+    return navigator.onLine ? 'Fikk ikke kontakt med Hub. Sjekk adressen.' : 'Ingen nett. Handlingene sendes når du har dekning igjen.';
+  }
   if (e.status === 401) return 'Trello avviste nøkkel eller token. Sjekk at begge er limt inn riktig, uten mellomrom.';
   if (e.status === 404) return 'Trello finner ikke tavlen Vaktmester. Har kontoen din tilgang?';
   if (e.status) return `Trello ga feil ${e.status}. ${e.body || ''}`;

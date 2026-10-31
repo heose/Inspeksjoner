@@ -5,12 +5,25 @@
 const ORIGINS = ['https://heose.github.io', 'http://localhost:8000', 'http://127.0.0.1:8000'];
 const MAX_PDF = 20 * 1024 * 1024;
 
+// Trello-proxy: nøkkel og token (secrets TRELLO_KEY og TRELLO_TOKEN) legges på her.
+// Bare disse kallene mot tavlen Vaktmester er tillatt.
+const BOARD = '69fd92b5f73c4c4645f0a9b2', ID = '[0-9a-f]{24}';
+const TR_ALLOW = [
+  ['GET', new RegExp(`^boards/${BOARD}$`)],
+  ['GET', new RegExp(`^boards/${BOARD}/(members|labels|cards/all)$`)],
+  ['POST', /^labels$/],
+  ['POST', /^cards$/],
+  ['GET', new RegExp(`^cards/${ID}$`)],
+  ['PUT', new RegExp(`^cards/${ID}$`)],
+  ['POST', new RegExp(`^cards/${ID}/attachments$`)],
+];
+
 const cors = req => {
   const o = req.headers.get('Origin');
   return {
     'Access-Control-Allow-Origin': ORIGINS.includes(o) ? o : ORIGINS[0],
     'Access-Control-Allow-Headers': 'content-type, x-argus-code',
-    'Access-Control-Allow-Methods': 'GET, PUT, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
     'Access-Control-Max-Age': '86400',
     'Vary': 'Origin',
   };
@@ -29,6 +42,23 @@ export default {
     try {
       // GET /ping
       if (req.method === 'GET' && p[0] === 'ping') return json(req, { ok: true, ts: Date.now() });
+
+      // /trello/<sti>  – videresendes til api.trello.com/1/<sti>
+      if (p[0] === 'trello') {
+        if (!env.TRELLO_KEY || !env.TRELLO_TOKEN) return json(req, { error: 'Trello er ikke satt opp i Hub' }, 500);
+        const rest = p.slice(1).join('/');
+        if (!TR_ALLOW.some(([m, re]) => m === req.method && re.test(rest))) return json(req, { error: 'Ikke tillatt' }, 403);
+        const u = new URL('https://api.trello.com/1/' + rest);
+        for (const [k, v] of url.searchParams) if (k !== 'key' && k !== 'token') u.searchParams.set(k, v);
+        u.searchParams.set('key', env.TRELLO_KEY); u.searchParams.set('token', env.TRELLO_TOKEN);
+        const init = { method: req.method, headers: {} };
+        if (req.method !== 'GET') {
+          init.body = await req.arrayBuffer();
+          const ct = req.headers.get('content-type'); if (ct) init.headers['content-type'] = ct;
+        }
+        const r = await fetch(u.toString(), init);
+        return new Response(r.body, { status: r.status, headers: { ...cors(req), 'content-type': r.headers.get('content-type') || 'application/json' } });
+      }
 
       // PUT /log/:id   (JSON: { id, date, ... })
       if (req.method === 'PUT' && p[0] === 'log' && p[1]) {
