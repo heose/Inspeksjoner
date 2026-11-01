@@ -55,6 +55,9 @@ async function varsle(env, o = {}) {
   } catch (e) { return false; }
 }
 
+// Versjonsnøkkel: endres hver gang noe nytt skrives (logg, handling, innmelding). Appene leser den (1 lesing) og henter
+// bare lister når den er endret. Sparer list-kall i KV, som har en gratisgrense på 1 000 per døgn.
+const bump = env => env.ARGUS.put('rev', String(Date.now())).catch(() => {});
 const cut = (v, n) => String(v == null ? '' : v).slice(0, n);
 function cleanAct(b, id) {
   return {
@@ -194,6 +197,7 @@ async function melding(req, env) {
   const id = crypto.randomUUID();
   for (let i = 0; i < bytes.length; i++) await env.ARGUS.put(`inboxpic:${id}:${i}`, bytes[i], { expirationTtl: MELD_TTL });
   await env.ARGUS.put(`inbox:${id}`, JSON.stringify({ id, at: Date.now(), status: 'ny', where, text, name, phone, pics: bytes.length }), { expirationTtl: MELD_TTL });
+  await bump(env);
   await varsle(env);
   return json(req, { ok: true });
 }
@@ -231,6 +235,7 @@ export default {
     try {
       // GET /ping
       if (req.method === 'GET' && p[0] === 'ping') return json(req, { ok: true, ts: Date.now() });
+      if (req.method === 'GET' && p[0] === 'rev' && !p[1]) return json(req, { rev: await env.ARGUS.get('rev') });
 
       // GET /snow  –  analyse av prognosen uten å sende noe.  POST /snow (bare administrator): kjør som cron.  POST /snow?test=1: send testvarsel.
       if (p[0] === 'snow' && !p[1]) {
@@ -284,7 +289,7 @@ export default {
             if (!['godkjent', 'avvist', 'ny'].includes(d.status)) return json(req, { error: 'Ugyldig status' }, 400);
             const cur = await env.ARGUS.get(`inbox:${p[1]}`); if (!cur) return json(req, { error: 'Finnes ikke' }, 404);
             const rec = JSON.parse(cur); rec.status = d.status; rec.by = user.name; rec.handledAt = Date.now(); if (d.card) rec.card = String(d.card).slice(0, 200);
-            await env.ARGUS.put(`inbox:${p[1]}`, JSON.stringify(rec), { expirationTtl: MELD_TTL });
+            await env.ARGUS.put(`inbox:${p[1]}`, JSON.stringify(rec), { expirationTtl: MELD_TTL }); await bump(env);
             return json(req, { ok: true });
           }
         }
@@ -336,7 +341,7 @@ export default {
         if (!/^\d{4}-\d{2}$/.test(ym)) return json(req, { error: 'Ugyldig dato' }, 400);
         rec.id = p[1]; rec.hubAt = Date.now(); rec.user = user.name;
         const lk = `log:${ym}:${p[1]}`, fantes = await env.ARGUS.get(lk);
-        await env.ARGUS.put(lk, JSON.stringify(rec));
+        await env.ARGUS.put(lk, JSON.stringify(rec)); await bump(env);
         // Push når et avvik registreres første gang, uavhengig av hvem som melder. Gamle poster og oppdateringer varsler ikke.
         const nytt = !fantes && (Number(rec.flags) > 0 || rec.tpl === 'avvik') && String(rec.date || '') >= new Date(Date.now() - 2 * 864e5).toISOString().slice(0, 10);
         if (nytt) {
@@ -358,7 +363,7 @@ export default {
           if ((cur.upd || 0) > fresh.upd) Object.assign(fresh, { done: cur.done, doneAt: cur.doneAt, doneBy: cur.doneBy, closedIn: cur.closedIn, upd: cur.upd });
         }
         const next = JSON.stringify(fresh);
-        if (next !== curS) await env.ARGUS.put(key, next, fresh.done ? { expirationTtl: 30 * 86400 } : undefined);
+        if (next !== curS) { await env.ARGUS.put(key, next, fresh.done ? { expirationTtl: 30 * 86400 } : undefined); await bump(env); }
         return json(req, { ok: true });
       }
       if (req.method === 'GET' && p[0] === 'actions' && !p[1]) {

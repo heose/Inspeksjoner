@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-01 å5';
+const APP_VERSION = '2026-11-01 å6';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -78,6 +78,7 @@ S.settings.trello = S.settings.trello || {};
 S.settings.hub = S.settings.hub || {};
 S.hubMonths = {};
 try { const o = JSON.parse(localStorage.getItem('insp-hub') || 'null'); if (o && o.months) S.hubMonths = o.months; else if (o && o.ym) S.hubMonths = { [o.ym]: { rows: o.rows || [], at: o.at || 0 } }; } catch (e) { S.hubMonths = {}; }
+try { S.hubRev = localStorage.getItem('insp-rev') || null; } catch (e) { S.hubRev = null; }
 S.hubActs = {};
 try { const o = JSON.parse(localStorage.getItem('insp-acts') || 'null'); if (o && o.items) S.hubActs = o.items; } catch (e) { S.hubActs = {}; }
 const saveSettings = () => { try { localStorage.setItem('insp-settings', JSON.stringify(S.settings)); } catch (e) {} };
@@ -1437,19 +1438,23 @@ async function hubSync(manual) {
     const yms = recentMonths(13), cur = yms[0], now = Date.now();
     /* Sparer KV-kall i Hub (gratisgrense per døgn): nyeste måned høyst hvert 90. sekund, forrige måned hver 6. time,
        eldre måneder hver 24. time. «Oppdater nå» henter bare de to nyeste. Manglende måneder hentes én gang. */
-    const need = yms.filter((y, k) => !S.hubMonths[y] || (k === 0 && (manual === true || now - S.hubMonths[y].at > 90e3)) || (k === 1 && (manual === true || now - S.hubMonths[y].at > 6 * 3600e3)) || (k > 1 && now - S.hubMonths[y].at > 24 * 3600e3));
+    let rev = null; try { rev = (await hubFetch('GET', '/rev')).rev || null; } catch (e) { if (e.status === 401) throw e; }
+    const idle = !!rev && rev === S.hubRev && manual !== true && !!S.hubMonths[cur] && S.view !== 'inbox';   // ingenting nytt i Hub siden sist
+    if (idle) S.hubMonths[cur].at = now;
+    const need = yms.filter((y, k) => !S.hubMonths[y] || (k === 0 && (rev ? !idle : (manual === true || now - S.hubMonths[y].at > 90e3))) || (k === 1 && (manual === true || now - S.hubMonths[y].at > 6 * 3600e3)) || (k > 1 && now - S.hubMonths[y].at > 24 * 3600e3));
     const got = await Promise.all(need.map(async y => { try { return [y, await hubFetch('GET', '/month/' + y)]; } catch (e) { if (y === cur || e.status === 401) throw e; return null; } }));
     try { await loadLinks(); } catch (e) { if (e.status === 401) throw e; }
-    if (manual === true || S.view === 'inbox' || !S.inbox || now - (S.inboxAt || 0) > 300e3) {
+    if (manual === true || S.view === 'inbox' || !S.inbox || (rev ? !idle : now - (S.inboxAt || 0) > 300e3)) {
       try { S.inbox = (await hubFetch('GET', '/inbox')).items || []; S.inboxAt = now; } catch (e) { if (e.status === 401) throw e; S.inbox = S.inbox || null; }
     }
     S.actsErr = null;
-    const pullNow = manual === true || now - (S.actsAt || 0) > 120e3 || Object.values(S.hubActs).some(r => r.dirty);
+    const pullNow = manual === true || (rev ? !idle : now - (S.actsAt || 0) > 120e3) || Object.values(S.hubActs).some(r => r.dirty);
     try { await pushRemoteEdits(); if (pullNow) { await pullActs(); S.actsAt = now; } await pushActs(); await reapActs(); }
     catch (e) { if (e.status === 401) throw e; S.actsErr = e.status === 404 ? 'Hub mangler oppdatering. Handlinger deles ikke ennå.' : hubErr(e); console.warn('Delte handlinger', e); }
     for (const g of got) if (g) S.hubMonths[g[0]] = { rows: g[1].rows || [], at: Date.now() };
     for (const y of Object.keys(S.hubMonths)) if (!yms.includes(y)) delete S.hubMonths[y];
     try { localStorage.setItem('insp-hub', JSON.stringify({ months: S.hubMonths })); } catch (e) {}
+    if (rev && !S.actsErr) { S.hubRev = rev; try { localStorage.setItem('insp-rev', rev); } catch (e) {} }
     if (manual === true) toast('Oppdatert fra Hub');
   } catch (e) { S.hubErrMsg = hubErr(e); console.error(e); if (manual === true) toast(S.hubErrMsg, 8000); }
   S.hubBusy = false;
