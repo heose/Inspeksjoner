@@ -166,11 +166,15 @@ const CATS = {
   skade: { label: 'Skade / hærverk', short: 'Skade/hærverk', sub: 'Noe er ødelagt eller utsatt for skade.' },
   brikke: { label: 'Ny adgangsbrikke', short: 'Adgangsbrikke', sub: 'Bestill ny brikke, for eksempel ved tap eller ny beboer.' },
 };
+// over: tekster som overstyrer kategorien for ett bygg (SVK er boliger, ikke leietakere)
 const BYGG = {
   op: { name: 'Olsrød Park', cats: ['lokale', 'fellesareal', 'skade'] },
   vk: { name: 'Vekterkvartalet', cats: ['lokale', 'fellesareal', 'skade'] },
-  svk: { name: 'Sameiet VK', cats: ['lokale', 'fellesareal', 'skade', 'brikke'] },
+  svk: { name: 'Sameiet VK', cats: ['lokale', 'fellesareal', 'skade', 'brikke'], over: {
+    lokale: { label: 'Arbeid i din leilighet', short: 'Egen leilighet', sub: 'Gjelder arbeid i leiligheten din.', where: 'Hvilken leilighet?', hint: 'F.eks. leilighetsnummer eller seksjon.', text: 'Hva skal gjøres? Beskriv arbeidet og hvor i leiligheten.' },
+  } },
 };
+const catOf = (b, id) => ({ ...CATS[id], ...((BYGG[b] && BYGG[b].over && BYGG[b].over[id]) || {}) });
 const cleanLokaler = a => [...new Set((Array.isArray(a) ? a : []).map(x => cut(x, 80).trim()).filter(Boolean))].slice(0, 300);
 
 // Åpen: GET /melding/config            -> liste over bygg
@@ -180,7 +184,7 @@ async function meldingConfig(req, env, url) {
   if (!b) return json(req, { bygg: Object.entries(BYGG).map(([id, x]) => ({ id, name: x.name })) });
   const x = BYGG[b]; if (!x) return json(req, { error: 'Ukjent bygg' }, 404);
   let lokaler = []; try { lokaler = cleanLokaler(JSON.parse(await env.ARGUS.get('mcfg:' + b) || '[]')); } catch (e) { /* ingen liste */ }
-  const r = json(req, { id: b, name: x.name, cats: x.cats.map(id => ({ id, label: CATS[id].label, sub: CATS[id].sub })), lokaler });
+  const r = json(req, { id: b, name: x.name, cats: x.cats.map(id => { const c = catOf(b, id); return { id, label: c.label, sub: c.sub, where: c.where, hint: c.hint, text: c.text }; }), lokaler });
   r.headers.set('cache-control', 'public, max-age=60');
   return r;
 }
@@ -232,7 +236,7 @@ async function melding(req, env) {
   await env.ARGUS.put(`inbox:${id}`, JSON.stringify({ id, at: Date.now(), status: 'ny', where, text, name, phone, pics: bytes.length, ...(site ? { site, cat, urgent } : {}) }), { expirationTtl: MELD_TTL });
   await bump(env);
   const hast = cat === 'skade' || urgent;
-  await varsle(env, site ? { title: 'Argus – ' + BYGG[site].name, message: `Ny innmelding (${CATS[cat].short}${urgent ? ', haster' : ''}) venter på godkjenning`, priority: hast ? 1 : 0 } : {});
+  await varsle(env, site ? { title: 'Argus – ' + BYGG[site].name, message: `Ny innmelding (${catOf(site, cat).short}${urgent ? ', haster' : ''}) venter på godkjenning`, priority: hast ? 1 : 0 } : {});
   return json(req, { ok: true });
 }
 
