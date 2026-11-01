@@ -5,7 +5,7 @@
 // Ekstern innmelding: secret TURNSTILE_SECRET (robotsjekk). Åpen adresse: POST /melding. Resten krever kode.
 // Snøvarsel: Cron Trigger (0 */3 * * *) + secrets PUSHOVER_*, TRELLO_*. Test: GET /snow og POST /snow?test=1.
 
-const ORIGINS = ['https://heose.github.io', 'http://localhost:8000', 'http://127.0.0.1:8000'];
+const ORIGINS = ['https://argus.osebergdrift.no', 'https://heose.github.io', 'http://localhost:8000', 'http://127.0.0.1:8000'];
 const MAX_PDF = 20 * 1024 * 1024, MAX_CONTENT = 1024 * 1024;
 const MAX_FAILS = 10, FAIL_WINDOW = 900; // 10 feil kode-forsøk per IP per 15 min
 
@@ -178,7 +178,7 @@ async function melding(req, env) {
   if (!tsSecret) return json(req, { error: 'Mottaket er ikke ferdig satt opp' }, 500);
   const vr = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body: new URLSearchParams({ secret: tsSecret, response: String(d.token || ''), remoteip: ip }) });
   const v = await vr.json().catch(() => ({}));
-  if (!v.success || (v.hostname && v.hostname !== 'heose.github.io' && v.hostname !== 'localhost')) return json(req, { error: 'Robotsjekken feilet. Last siden på nytt og prøv igjen.' }, 400);
+  if (!v.success || (v.hostname && !['argus.osebergdrift.no', 'heose.github.io', 'localhost'].includes(v.hostname))) return json(req, { error: 'Robotsjekken feilet. Last siden på nytt og prøv igjen.' }, 400);
 
   const t = x => String(x == null ? '' : x).trim();
   const text = t(d.text), name = t(d.name), phone = t(d.phone), where = t(d.where);
