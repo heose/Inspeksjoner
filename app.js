@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-01 y';
+const APP_VERSION = '2026-11-01 z';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -1361,7 +1361,7 @@ function renderLinks() {
   const ls = linksList(), share = ls.filter(l => l.group !== 'intern'), intern = ls.filter(l => l.group === 'intern');
   let h = '';
   if (!ls.length) h += `<p class="empty">Ingen lenker er lagt inn ennå. Trykk «Rediger lenker» nederst.</p>`;
-  if (share.length) h += `<section><h2 class="h2">Til deling</h2><p class="muted small">Vis QR-koden til leietakeren, eller del lenken rett fra telefonen.</p><div class="list">${share.map(l => `<div class="linkcard"><div class="lk-t">${esc(l.title)}</div>${l.desc ? `<div class="rc-sub">${esc(l.desc)}</div>` : ''}<div class="row-btns"><button class="btn primary" data-act="lk-qr" data-id="${esc(l.id)}">Vis QR</button><button class="btn" data-act="lk-share" data-id="${esc(l.id)}">Del</button><button class="btn" data-act="lk-copy" data-id="${esc(l.id)}">Kopier</button></div></div>`).join('')}</div></section>`;
+  if (share.length) h += `<section><h2 class="h2">Til deling</h2><p class="muted small">Vis QR-koden til leietakeren, eller del lenken rett fra telefonen.</p><div class="list">${share.map(l => `<div class="linkcard"><div class="lk-t">${esc(l.title)}</div>${l.desc ? `<div class="rc-sub">${esc(l.desc)}</div>` : ''}<div class="row-btns"><a class="btn primary" href="${esc(l.url)}" target="_blank" rel="noopener">Åpne</a><button class="btn" data-act="lk-qr" data-id="${esc(l.id)}">Vis QR</button><button class="btn" data-act="lk-share" data-id="${esc(l.id)}">Del</button><button class="btn" data-act="lk-copy" data-id="${esc(l.id)}">Kopier</button></div></div>`).join('')}</div></section>`;
   if (intern.length) h += `<section><h2 class="h2">Interne skjema</h2><p class="muted small">Brukes bare internt.</p><div class="list">${intern.map(l => `<div class="linkcard"><div class="lk-t">${esc(l.title)}</div>${l.desc ? `<div class="rc-sub">${esc(l.desc)}</div>` : ''}<div class="row-btns"><a class="btn primary" href="${esc(l.url)}" target="_blank" rel="noopener">Åpne skjema</a><button class="btn" data-act="lk-copy" data-id="${esc(l.id)}">Kopier lenke</button></div></div>`).join('')}</div></section>`;
   h += `<button class="btn" data-act="lk-edit">Rediger lenker</button>`;
   const q = S.linkQr && lkFind(S.linkQr);
@@ -1375,7 +1375,7 @@ function renderLinksEdit() {
   h += d.map((l, i) => `<div class="linkcard"><label class="fld"><span>Navn</span><input data-lk="title" data-id="${esc(l.id)}" value="${esc(l.title)}"></label>
     <label class="fld"><span>Beskrivelse (valgfri)</span><input data-lk="desc" data-id="${esc(l.id)}" value="${esc(l.desc)}"></label>
     <label class="fld"><span>Lenke</span><input data-lk="url" data-id="${esc(l.id)}" inputmode="url" autocapitalize="off" autocomplete="off" spellcheck="false" value="${esc(l.url)}"></label>
-    <label class="fld"><span>Hvor vises den</span><select data-lk="group" data-id="${esc(l.id)}"><option value="share"${l.group !== 'intern' ? ' selected' : ''}>Til deling (QR, Del, Kopier)</option><option value="intern"${l.group === 'intern' ? ' selected' : ''}>Intern (Åpne skjema)</option></select></label>
+    <label class="fld"><span>Hvor vises den</span><select data-lk="group" data-id="${esc(l.id)}"><option value="share"${l.group !== 'intern' ? ' selected' : ''}>Til deling (Åpne, QR, Del, Kopier)</option><option value="intern"${l.group === 'intern' ? ' selected' : ''}>Intern (Åpne skjema)</option></select></label>
     <div class="row-btns"><button class="btn" data-act="lk-up" data-id="${esc(l.id)}"${i === 0 ? ' disabled' : ''} aria-label="Flytt opp">↑</button><button class="btn" data-act="lk-down" data-id="${esc(l.id)}"${i === d.length - 1 ? ' disabled' : ''} aria-label="Flytt ned">↓</button><button class="btn" data-act="lk-del" data-id="${esc(l.id)}">Slett</button></div></div>`).join('');
   h += `</div><button class="btn" data-act="lk-add">+ Legg til lenke</button><div class="row-btns"><button class="btn" data-act="lk-cancel">Avbryt</button><button class="btn primary" data-act="lk-save">Lagre</button></div>`;
   return h;
