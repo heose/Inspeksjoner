@@ -65,7 +65,7 @@
 <body>
 <main>
   <p class="co">Oseberg Drift og Service</p>
-  <h1>Meld fra</h1>
+  <h1>Meld fra om feil eller avvik</h1>
   <p class="chip" id="bygg" hidden></p>
   <p class="lead" id="lead">Ser du noe som er ødelagt, farlig eller bør sjekkes? Send en kort melding, gjerne med bilde.</p>
   <p class="urgent"><strong>Akutt fare for liv eller helse: ring 110, 112 eller 113 først.</strong> Dette skjemaet er ikke for nødsituasjoner.</p>
@@ -237,7 +237,7 @@ const TXT = {
   brikke:      { where: 'Leilighet eller seksjon', hint: '', text: 'Hvem skal ha brikken, og hvorfor? (ny beboer, tapt, ekstra)' },
 };
 function pickCat(id) {
-  CAT = id; const t = TXT[id] || TXT.fellesareal;
+  CAT = id; const c = (CFG.cats || []).find(x => x.id === id) || {}, t = { ...(TXT[id] || TXT.fellesareal), ...(c.where ? { where: c.where } : {}), ...(c.hint != null ? { hint: c.hint } : {}), ...(c.text ? { text: c.text } : {}) };
   $('#whereLbl').textContent = t.where; $('#whereHint').textContent = t.hint; $('#whereHint').hidden = !t.hint; $('#textLbl').textContent = t.text;
   $('#where').setAttribute('list', id === 'lokale' ? 'lokaler' : '');
   $('#picsBox').hidden = id === 'brikke'; $('#urgentBox').hidden = id === 'brikke'; $('#urgent').checked = id === 'skade';
