@@ -79,6 +79,14 @@ section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .pill.ok { background: var(--ok-soft); color: var(--ok); } .pill.bad { background: var(--bad-soft); color: var(--bad); }
 .pill.warn { background: var(--warn-soft); color: var(--warn); } .pill.na { background: var(--surface-2); color: var(--muted); }
 
+.inbox-card { display:flex; align-items:center; gap:12px; width:100%; text-align:left; margin:0 0 12px; background:#f5d98a; color:#2b2200; border:0; }
+.inbox-card .inbox-n { flex:none; min-width:32px; height:32px; border-radius:16px; background:#2b2200; color:#f5d98a; display:flex; align-items:center; justify-content:center; font-weight:700; }
+.inbox-card .chev { margin-left:auto; }
+.ib { display:grid; gap:10px; }
+.ib-top { display:flex; flex-wrap:wrap; gap:4px 10px; align-items:baseline; }
+.ib-text { margin:0; white-space:pre-wrap; }
+.ib-pics { display:flex; flex-wrap:wrap; gap:8px; }
+.ib-pics img { width:96px; height:96px; object-fit:cover; border-radius:10px; border:1px solid var(--line); }
 .mrow { display: flex; flex-direction: column; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 14px; }
 .row-card, .act-line { display: flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding-right: 8px; }
 .act-line { padding-left: 14px; }

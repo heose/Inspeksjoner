@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="nb">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Meld fra om feil – Oseberg Drift og Service</title>
+<style>
+  :root { --bg:#f3f6f8; --surface:#fff; --ink:#14212a; --muted:#566874; --line:#d6dee3; --accent:#0f5a7d; --accent-ink:#fff; --bad:#c0172f; --ok:#1a7a4c; --r:12px; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f161b; --surface:#182229; --ink:#e8eef2; --muted:#9db0bc; --line:#2c3a43; --accent:#6bb3d6; --accent-ink:#0b1a22; --bad:#ff7b8d; --ok:#6fd3a0; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; -webkit-text-size-adjust:100%; }
+  main { max-width:560px; margin:0 auto; padding:20px 16px calc(40px + env(safe-area-inset-bottom)); }
+  .co { font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:0 0 4px; }
+  h1 { font-size:26px; line-height:1.2; margin:0 0 8px; }
+  .lead { color:var(--muted); margin:0 0 20px; }
+  .urgent { background:var(--surface); border:1px solid var(--line); border-left:4px solid var(--bad); border-radius:var(--r); padding:10px 14px; font-size:14px; margin:0 0 22px; }
+  form { display:grid; gap:18px; }
+  label, .lbl { display:block; font-weight:600; font-size:15px; margin-bottom:6px; }
+  .hint { font-weight:400; color:var(--muted); font-size:13px; }
+  input[type=text], input[type=tel], textarea { width:100%; font:inherit; color:var(--ink); background:var(--surface); border:1px solid var(--line); border-radius:var(--r); padding:12px 14px; min-height:48px; -webkit-appearance:none; appearance:none; }
+  textarea { min-height:120px; resize:vertical; }
+  input:focus, textarea:focus, button:focus-visible { outline:3px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset:1px; }
+  .seg { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .seg label { margin:0; font-weight:500; }
+  .seg input { position:absolute; opacity:0; pointer-events:none; }
+  .seg span { display:flex; align-items:center; justify-content:center; text-align:center; min-height:48px; padding:8px 10px; background:var(--surface); border:1px solid var(--line); border-radius:var(--r); cursor:pointer; }
+  .seg input:checked + span { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:600; }
+  .seg input:focus-visible + span { outline:3px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset:1px; }
+  .pics { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  .thumb { position:relative; width:84px; height:84px; border-radius:10px; overflow:hidden; border:1px solid var(--line); }
+  .thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+  .thumb button { position:absolute; top:3px; right:3px; width:26px; height:26px; border-radius:50%; border:0; background:rgba(0,0,0,.65); color:#fff; font-size:16px; line-height:1; cursor:pointer; }
+  .add { width:84px; height:84px; display:flex; align-items:center; justify-content:center; text-align:center; font-size:13px; border:1.5px dashed var(--line); border-radius:10px; color:var(--muted); background:transparent; cursor:pointer; }
+  .add input { display:none; }
+  .btn { font:inherit; font-weight:700; background:var(--accent); color:var(--accent-ink); border:0; border-radius:var(--r); min-height:52px; padding:0 18px; width:100%; cursor:pointer; }
+  .btn[disabled] { opacity:.55; cursor:default; }
+  .msg { padding:12px 14px; border-radius:var(--r); font-size:15px; }
+  .msg.err { background:color-mix(in srgb, var(--bad) 14%, var(--surface)); border:1px solid var(--bad); }
+  .done { background:var(--surface); border:1px solid var(--ok); border-radius:var(--r); padding:22px 18px; text-align:center; }
+  .done h2 { margin:0 0 6px; color:var(--ok); }
+  .small { font-size:13px; color:var(--muted); }
+  .hp { position:absolute; left:-9999px; height:0; overflow:hidden; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <p class="co">Oseberg Drift og Service</p>
+  <h1>Meld fra om feil eller avvik</h1>
+  <p class="lead">Se noe som er ødelagt, farlig eller bør sjekkes? Send oss en kort melding, gjerne med bilde. Vi tar kontakt om noe er uklart.</p>
+  <p class="urgent"><strong>Akutt fare for liv eller helse:</strong> ring 110, 112 eller 113 først. Dette skjemaet er ikke for nødsituasjoner.</p>
+
+  <form id="f" novalidate>
+    <div>
+      <span class="lbl" id="l-bygg">Hvilket bygg?</span>
+      <div class="seg" role="radiogroup" aria-labelledby="l-bygg">
+        <label><input type="radio" name="site" value="op"><span>Olsrød Park</span></label>
+        <label><input type="radio" name="site" value="vk"><span>Vekterkvartalet</span></label>
+        <label><input type="radio" name="site" value="svk"><span>Sameiet VK</span></label>
+        <label><input type="radio" name="site" value="tb"><span>Tollbodgata 14</span></label>
+        <label style="grid-column:1/-1"><input type="radio" name="site" value="ukjent" checked><span>Vet ikke / annet</span></label>
+      </div>
+    </div>
+    <div>
+      <label for="text">Hva er galt, og hvor? <span class="hint">(etasje, rom, utgang …)</span></label>
+      <textarea id="text" maxlength="2000" autocomplete="off" placeholder="F.eks. Lekkasje fra taket ved inngang B, 2. etasje"></textarea>
+    </div>
+    <div>
+      <span class="lbl">Bilder <span class="hint">(valgfritt, opptil 3)</span></span>
+      <div class="pics" id="pics">
+        <label class="add" id="addlbl">+ Legg til bilde<input type="file" id="file" accept="image/*" multiple></label>
+      </div>
+    </div>
+    <div>
+      <label for="name">Navn</label>
+      <input type="text" id="name" maxlength="80" autocomplete="name">
+    </div>
+    <div>
+      <label for="phone">Telefon <span class="hint">(så vi kan ringe deg)</span></label>
+      <input type="tel" id="phone" maxlength="30" autocomplete="tel" inputmode="tel">
+    </div>
+    <div class="hp" aria-hidden="true"><label>Ikke fyll ut<input type="text" id="website" tabindex="-1" autocomplete="off"></label></div>
+    <div id="ts"></div>
+    <div class="msg err" id="err" role="alert" hidden></div>
+    <button class="btn" type="submit" id="send">Send melding</button>
+    <p class="small">Navn og telefon brukes bare til å kontakte deg om denne saken.</p>
+  </form>
+
+  <div class="done" id="done" hidden>
+    <h2>Takk!</h2>
+    <p>Vi har mottatt meldingen og tar den videre. Er det noe vi lurer på, ringer vi deg.</p>
+    <p><button class="btn" type="button" id="again">Send en ny melding</button></p>
+  </div>
+</main>
+
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" defer></script>
+<script>
+'use strict';
+const HUB = 'https://argus-hub.osebergdrift-2e2.workers.dev';
+const SITEKEY = '0x4AAAAAAFun1ABDhmebHsg6';
+const MAX_PICS = 3;
+const $ = s => document.querySelector(s);
+const pics = []; // { url, b64 }
+let tsId = null, busy = false;
+
+function mountTurnstile() {
+  if (window.turnstile && tsId === null) { tsId = window.turnstile.render('#ts', { sitekey: SITEKEY, language: 'nb' }); return; }
+  if (tsId === null) setTimeout(mountTurnstile, 250);
+}
+mountTurnstile();
+
+function showErr(t) { const e = $('#err'); e.textContent = t; e.hidden = !t; if (t) e.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+
+async function toJpeg(file) {
+  let bmp;
+  try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+  catch (e) {
+    bmp = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); });
+  }
+  const w0 = bmp.width || bmp.naturalWidth, h0 = bmp.height || bmp.naturalHeight, k = Math.min(1, 1600 / Math.max(w0, h0));
+  const c = document.createElement('canvas'); c.width = Math.round(w0 * k); c.height = Math.round(h0 * k);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  let q = 0.72, blob;
+  do { blob = await new Promise(r => c.toBlob(r, 'image/jpeg', q)); q -= 0.12; } while (blob && blob.size > 1.2 * 1024 * 1024 && q > 0.3);
+  if (!blob) throw new Error('Kunne ikke lese bildet');
+  const b64 = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = rej; fr.readAsDataURL(blob); });
+  return { url: URL.createObjectURL(blob), b64 };
+}
+
+function renderPics() {
+  const box = $('#pics'); box.querySelectorAll('.thumb').forEach(n => n.remove());
+  pics.forEach((p, i) => {
+    const d = document.createElement('div'); d.className = 'thumb';
+    d.innerHTML = '<img alt="Valgt bilde ' + (i + 1) + '"><button type="button" aria-label="Fjern bilde ' + (i + 1) + '">×</button>';
+    d.querySelector('img').src = p.url;
+    d.querySelector('button').onclick = () => { pics.splice(i, 1); renderPics(); };
+    box.insertBefore(d, $('#addlbl'));
+  });
+  $('#addlbl').hidden = pics.length >= MAX_PICS;
+}
+
+$('#file').addEventListener('change', async e => {
+  const files = [...e.target.files]; e.target.value = ''; showErr('');
+  for (const f of files) {
+    if (pics.length >= MAX_PICS) break;
+    try { pics.push(await toJpeg(f)); renderPics(); } catch (err) { showErr('Kunne ikke bruke et av bildene. Prøv et annet.'); }
+  }
+});
+
+$('#f').addEventListener('submit', async e => {
+  e.preventDefault(); if (busy) return; showErr('');
+  const text = $('#text').value.trim(), name = $('#name').value.trim(), phone = $('#phone').value.trim();
+  const token = window.turnstile && tsId !== null ? window.turnstile.getResponse(tsId) : '';
+  if (text.length < 5) return showErr('Beskriv kort hva som er galt og hvor.');
+  if (name.length < 2) return showErr('Skriv navnet ditt.');
+  if (!/^[+\d][\d\s()+-]{5,29}$/.test(phone)) return showErr('Skriv et telefonnummer vi kan ringe.');
+  if (!token) return showErr('Vent til robotsjekken er ferdig, og prøv igjen.');
+  busy = true; const btn = $('#send'); btn.disabled = true; btn.textContent = 'Sender …';
+  try {
+    const r = await fetch(HUB + '/melding', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ site: (document.querySelector('input[name=site]:checked') || {}).value, text, name, phone, website: $('#website').value, token, pics: pics.map(p => p.b64) }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || 'Noe gikk galt. Prøv igjen, eller ring oss.');
+    $('#f').hidden = true; $('#done').hidden = false; window.scrollTo(0, 0);
+  } catch (err) {
+    showErr(err instanceof TypeError ? 'Fikk ikke kontakt. Sjekk nettet og prøv igjen.' : err.message);
+    if (window.turnstile && tsId !== null) window.turnstile.reset(tsId);
+  }
+  busy = false; btn.disabled = false; btn.textContent = 'Send melding';
+});
+
+$('#again').addEventListener('click', () => {
+  $('#f').reset(); pics.length = 0; renderPics(); $('#f').hidden = false; $('#done').hidden = true;
+  if (window.turnstile && tsId !== null) window.turnstile.reset(tsId);
+});
+</script>
+</body>
+</html>

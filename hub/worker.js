@@ -2,6 +2,7 @@
 // Oppsett: se hub/README.md
 // Bindinger: KV-namespace "ARGUS".
 // Secrets: CODE (felles kode, administrator), eller CODES (JSON: {"henrik":"kode1","kari":"kode2"}) og ADMINS (navn, kommaseparert).
+// Ekstern innmelding: secret TURNSTILE_SECRET (robotsjekk). Åpen adresse: POST /melding. Resten krever kode.
 
 const ORIGINS = ['https://heose.github.io', 'http://localhost:8000', 'http://127.0.0.1:8000'];
 const MAX_PDF = 20 * 1024 * 1024, MAX_CONTENT = 1024 * 1024;
@@ -32,6 +33,54 @@ const TR_ALLOW = [
   ['POST', new RegExp(`^cards/${ID}/attachments$`)],
 ];
 
+// ---------- Ekstern innmelding (åpen, uten kode, men med robotsjekk og grenser) ----------
+const SECRET = (env, n) => { const k = Object.keys(env).find(x => x.toLowerCase() === n); return k ? env[k] : undefined; };
+const SITE_IDS = ['op', 'vk', 'svk', 'tb', 'ukjent'];
+const MELD_TTL = 90 * 86400, MAX_BODY = 6 * 1024 * 1024, MAX_PICS = 3, MAX_PIC_CHARS = 2 * 1024 * 1024;
+const MELD_PER_HOUR = 5, MELD_PER_DAY = 100;
+const fromB64 = s => { const bin = atob(s); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; };
+
+async function melding(req, env) {
+  const o = req.headers.get('Origin');
+  if (o && !ORIGINS.includes(o)) return json(req, { error: 'Ikke tillatt' }, 403);
+  if (req.method !== 'POST') return json(req, { error: 'Ikke tillatt' }, 405);
+  if (parseInt(req.headers.get('content-length') || '0', 10) > MAX_BODY) return json(req, { error: 'Meldingen er for stor' }, 413);
+  const ip = req.headers.get('CF-Connecting-IP') || 'ukjent';
+  const hour = new Date().toISOString().slice(0, 13), day = hour.slice(0, 10);
+  const rk = `rl:${ip}:${hour}`, dk = `rl:day:${day}`;
+  const n = parseInt(await env.ARGUS.get(rk) || '0', 10), nd = parseInt(await env.ARGUS.get(dk) || '0', 10);
+  if (nd >= MELD_PER_DAY) return json(req, { error: 'Mottaket er midlertidig stengt. Ring i stedet.' }, 429);
+  if (n >= MELD_PER_HOUR) return json(req, { error: 'For mange meldinger fra deg nå. Prøv igjen om en time, eller ring.' }, 429);
+  await env.ARGUS.put(rk, String(n + 1), { expirationTtl: 3700 });
+  await env.ARGUS.put(dk, String(nd + 1), { expirationTtl: 90000 });
+
+  let d; try { d = await req.json(); } catch (e) { return json(req, { error: 'Ugyldig melding' }, 400); }
+  if (d.website) return json(req, { ok: true }); // skjult felt: roboter fyller det ut
+  const tsSecret = SECRET(env, 'turnstile_secret');
+  if (!tsSecret) return json(req, { error: 'Mottaket er ikke ferdig satt opp' }, 500);
+  const vr = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body: new URLSearchParams({ secret: tsSecret, response: String(d.token || ''), remoteip: ip }) });
+  const v = await vr.json().catch(() => ({}));
+  if (!v.success || (v.hostname && v.hostname !== 'heose.github.io' && v.hostname !== 'localhost')) return json(req, { error: 'Robotsjekken feilet. Last siden på nytt og prøv igjen.' }, 400);
+
+  const t = x => String(x == null ? '' : x).trim();
+  const text = t(d.text), name = t(d.name), phone = t(d.phone), site = SITE_IDS.includes(d.site) ? d.site : 'ukjent';
+  if (text.length < 5 || text.length > 2000) return json(req, { error: 'Beskriv saken med 5 til 2000 tegn.' }, 400);
+  if (name.length < 2 || name.length > 80) return json(req, { error: 'Skriv navnet ditt.' }, 400);
+  if (!/^[+\d][\d\s()+-]{5,29}$/.test(phone)) return json(req, { error: 'Skriv et telefonnummer vi kan ringe.' }, 400);
+  const pics = Array.isArray(d.pics) ? d.pics.slice(0, MAX_PICS) : [];
+  const bytes = [];
+  for (const p of pics) {
+    if (typeof p !== 'string' || p.length > MAX_PIC_CHARS) return json(req, { error: 'Et bilde er for stort.' }, 400);
+    let u; try { u = fromB64(p); } catch (e) { return json(req, { error: 'Ugyldig bilde.' }, 400); }
+    if (u[0] !== 0xFF || u[1] !== 0xD8 || u[2] !== 0xFF) return json(req, { error: 'Bare JPEG-bilder er tillatt.' }, 400);
+    bytes.push(u);
+  }
+  const id = crypto.randomUUID();
+  for (let i = 0; i < bytes.length; i++) await env.ARGUS.put(`inboxpic:${id}:${i}`, bytes[i], { expirationTtl: MELD_TTL });
+  await env.ARGUS.put(`inbox:${id}`, JSON.stringify({ id, at: Date.now(), status: 'ny', site, text, name, phone, pics: bytes.length }), { expirationTtl: MELD_TTL });
+  return json(req, { ok: true });
+}
+
 const cors = req => {
   const o = req.headers.get('Origin');
   return {
@@ -51,6 +100,8 @@ export default {
     const url = new URL(req.url);
     const p = url.pathname.split('/').filter(Boolean);
 
+    if (p[0] === 'melding' && !p[1]) { try { return await melding(req, env); } catch (e) { return json(req, { error: 'Noe gikk galt. Prøv igjen, eller ring.' }, 500); } }
+
     const ip = req.headers.get('CF-Connecting-IP') || 'ukjent', failKey = 'fail:' + ip;
     const fails = parseInt(await env.ARGUS.get(failKey) || '0', 10);
     if (fails >= MAX_FAILS) return json(req, { error: 'For mange forsøk. Vent 15 minutter.' }, 429);
@@ -63,8 +114,7 @@ export default {
 
       // /trello/<sti>  – videresendes til api.trello.com/1/<sti>
       if (p[0] === 'trello') {
-        const sec = n => { const k = Object.keys(env).find(x => x.toLowerCase() === n); return k ? env[k] : undefined; };
-        const TKEY = sec('trello_key'), TTOKEN = sec('trello_token');
+        const TKEY = SECRET(env, 'trello_key'), TTOKEN = SECRET(env, 'trello_token');
         if (!TKEY || !TTOKEN) return json(req, { error: 'Trello er ikke satt opp i Hub' }, 500);
         const rest = p.slice(1).join('/');
         if (!TR_ALLOW.some(([m, re]) => m === req.method && re.test(rest))) return json(req, { error: 'Ikke tillatt' }, 403);
@@ -78,6 +128,36 @@ export default {
         }
         const r = await fetch(u.toString(), init);
         return new Response(r.body, { status: r.status, headers: { ...cors(req), 'content-type': r.headers.get('content-type') || 'application/json' } });
+      }
+
+      // Innmeldinger fra eksterne: GET /inbox, GET /inbox/:id/pic/:n, PUT /inbox/:id/status
+      if (p[0] === 'inbox') {
+        if (req.method === 'GET' && !p[1]) {
+          const items = []; let cursor;
+          do {
+            const l = await env.ARGUS.list({ prefix: 'inbox:', cursor });
+            const vals = await Promise.all(l.keys.map(k => env.ARGUS.get(k.name)));
+            for (const x of vals) if (x) items.push(JSON.parse(x));
+            cursor = l.list_complete ? null : l.cursor;
+          } while (cursor);
+          items.sort((a, b) => b.at - a.at);
+          return json(req, { items: items.slice(0, 60) });
+        }
+        if (p[1] && /^[\w-]{8,64}$/.test(p[1])) {
+          if (req.method === 'GET' && p[2] === 'pic' && /^\d$/.test(p[3] || '')) {
+            const v = await env.ARGUS.get(`inboxpic:${p[1]}:${p[3]}`, 'arrayBuffer');
+            if (!v) return json(req, { error: 'Finnes ikke' }, 404);
+            return new Response(v, { headers: { ...cors(req), 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=3600' } });
+          }
+          if (req.method === 'PUT' && p[2] === 'status') {
+            const d = await req.json();
+            if (!['godkjent', 'avvist', 'ny'].includes(d.status)) return json(req, { error: 'Ugyldig status' }, 400);
+            const cur = await env.ARGUS.get(`inbox:${p[1]}`); if (!cur) return json(req, { error: 'Finnes ikke' }, 404);
+            const rec = JSON.parse(cur); rec.status = d.status; rec.by = user.name; rec.handledAt = Date.now(); if (d.card) rec.card = String(d.card).slice(0, 200);
+            await env.ARGUS.put(`inbox:${p[1]}`, JSON.stringify(rec), { expirationTtl: MELD_TTL });
+            return json(req, { ok: true });
+          }
+        }
       }
 
       // GET /content  –  PUT /content (bare administrator): sjekklister, bygg og anleggsregister som skript

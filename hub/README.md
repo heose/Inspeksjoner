@@ -47,3 +47,14 @@ Hub tillater bare kallene appen trenger mot tavlen Vaktmester. Bytter du token i
 2. Publiser ny app (main).
 3. Åpne appen på PC, legg inn adresse og administratorkode, trykk «last opp innholdsfil» og velg `content.js`.
 4. Telefonene henter innholdet selv neste gang de åpnes med nett.
+
+## Ekstern innmelding (leietakere og andre)
+
+Åpen side: `https://heose.github.io/Inspeksjoner/melding.html` (del lenken på SMS, eller bruk QR-koden).
+
+1. Cloudflare → Turnstile → Add widget. Hostname `heose.github.io`, modus Managed. Site key står i `melding.html`.
+2. Worker → Variables and Secrets → secret `TURNSTILE_SECRET` (Secret key fra Turnstile).
+3. Lim inn nyeste `hub/worker.js` og Deploy.
+4. I Argus dukker meldinger opp som «Innmeldinger» på forsiden (oppdateres ved synk, eller trykk Oppdater nå). Velg bygg, rediger tittel og trykk Godkjenn til Trello. Kortet får etikett «Ekstern melding», bilder og kontaktinfo.
+
+Vern: robotsjekk (Turnstile), skjult felt mot roboter, maks 5 meldinger per time per avsender, maks 100 per døgn totalt, maks 3 JPEG-bilder per melding og 6 MB totalt. Meldinger og bilder slettes automatisk etter 90 dager.

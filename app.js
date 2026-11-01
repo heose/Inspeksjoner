@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-01 t';
+const APP_VERSION = '2026-11-01 u';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -67,6 +67,7 @@ const DB = {
 };
 
 const S = {
+  inbox: null, ibEdit: {}, inboxPics: {},
   ins: {}, cur: null, view: 'home', ready: false, error: null,
   settings: { by: 'Henrik Oseberg', company: 'Oseberg Drift og Service' },
   pickKey: null, ready_file: null, confirmFinish: false, showAllHist: false, showSettings: false, busy: false,
@@ -285,6 +286,9 @@ function render() {
   } else if (S.view === 'site' && S.site && S.ready) {
     bar.innerHTML = `<button class="back" data-act="home-root" aria-label="Tilbake til byggene">‹ Bygg</button><div class="bar-title">${esc(SITES.find(x => x.id === S.site).name)}</div><div class="bar-status"></div>`;
     app.innerHTML = renderSite();
+  } else if (S.view === 'inbox' && S.ready) {
+    bar.innerHTML = `<button class="back" data-act="home-root" aria-label="Tilbake til oversikten">‹ Oversikt</button><div class="bar-title">Innmeldinger</div><div class="bar-status"></div>`;
+    app.innerHTML = renderInbox();
   } else if (S.view === 'ins' && cur()) {
     const t = TPL[cur().templateId];
     bar.innerHTML = `<button class="back" data-act="home" aria-label="Tilbake">‹ ${S.anl && ANL[S.anl] ? 'Anlegg' : S.site ? SITES.find(x => x.id === S.site).short : 'Oversikt'}</button><div class="bar-title">${esc(t.name)}</div><div class="bar-status" id="save-status">Lagret</div>`;
@@ -370,6 +374,8 @@ function renderHome() {
     const lb = S.settings.lastBackup, ndone = all.filter(i => i.status === 'complete').length;
     if (ndone && (!lb || daysBetween(lb, todayISO()) >= 7)) h += `<div class="notice backup"><strong>${lb ? `Siste sikkerhetskopi er ${daysBetween(lb, todayISO())} dager gammel.` : 'Du har ikke tatt sikkerhetskopi ennå.'}</strong> Alt ligger bare på denne telefonen. Lagre kopien i iCloud Drive eller Google Drive.<div class="row-btns"><button class="btn primary" data-act="export">Lag sikkerhetskopi nå</button></div></div>`;
   }
+  { const nNy = (S.inbox || []).filter(x => x.status === 'ny').length;
+    if (nNy) h += `<button class="btn inbox-card" data-act="inbox-open"><span class="inbox-n">${nNy}</span><span>${nNy === 1 ? 'Ny innmelding' : 'Nye innmeldinger'} fra eksterne venter på godkjenning</span><span class="chev" aria-hidden="true">›</span></button>`; }
   h += `<button class="btn avvik-big" data-act="avvik-new">Meld avvik</button>`;
   h += `<section><h2 class="h2">Velg bygg</h2><div class="list">${SITES.map(site => {
     const ss = siteState(site);
@@ -697,6 +703,11 @@ document.addEventListener('click', async e => {
       break;
     case 'hub-sync': await syncTrello(); await hubSync(true); break;
     case 'gate-connect': await gateConnect(); break;
+    case 'inbox-open': S.view = 'inbox'; render(); window.scrollTo(0, 0); loadInboxPics(); hubSync(); break;
+    case 'ib-ok': await ibApprove(b.dataset.id, b); break;
+    case 'ib-no':
+      if (b.dataset.armed) await ibReject(b.dataset.id); else arm(b, 'Trykk igjen for å avvise');
+      break;
     case 'content-upload': $('#contentpick').click(); break;
     case 'export': await exportBackup(); break;
     case 'import': $('#importpick').click(); break;
@@ -710,6 +721,7 @@ function arm(b, label) {
 document.addEventListener('input', e => {
   const el = e.target; const ins = cur();
   if (el.dataset.trello) { const t = S.settings.trello; t[el.dataset.trello] = el.value.trim(); t.members = null; saveSettings(); return; }
+  if (el.dataset.ib) { (S.ibEdit[el.dataset.id] ||= {})[el.dataset.ib] = el.value; return; }
   if (el.dataset.hub) { S.settings.hub[el.dataset.hub] = el.value.trim(); saveSettings(); return; }
   if (el.dataset.lnote) { S.settings.notes[el.dataset.lnote] = el.value; saveSettings(); return; }
   if (el.dataset.set) { S.settings[el.dataset.set] = el.value; saveSettings(); return; }
@@ -1227,6 +1239,7 @@ async function hubSync(manual) {
     }
     const ym = todayISO().slice(0, 7);
     const m = await hubFetch('GET', '/month/' + ym);
+    try { S.inbox = (await hubFetch('GET', '/inbox')).items || []; } catch (e) { if (e.status === 401) throw e; S.inbox = S.inbox || null; }
     S.hubMonth = { ym, rows: m.rows || [], at: Date.now() };
     try { localStorage.setItem('insp-hub', JSON.stringify(S.hubMonth)); } catch (e) {}
     if (manual === true) toast('Oppdatert fra Hub');
@@ -1234,6 +1247,7 @@ async function hubSync(manual) {
   S.hubBusy = false;
   await flushAll();
   if (S.view !== 'ins') render();
+  if (S.view === 'inbox') loadInboxPics();
 }
 async function loadContent() {
   if (!hubCfg() || !navigator.onLine || S.view === 'ins') return false;
@@ -1264,6 +1278,78 @@ $('#contentpick').addEventListener('change', async e => {
     S.contentAt = null; S.gateErr = null; await loadContent(); render(); toast('Innholdet er lastet opp til Hub', 4000); hubSync();
   } catch (err) { toast(err.status === 403 ? 'Bare administrator kan laste opp innhold.' : err.status ? hubErr(err) : 'Kunne ikke laste opp: ' + (err.message || err), 7000); }
 });
+async function hubBlob(path) {
+  const c = hubCfg(); const r = await fetch(c.url + path, { headers: { 'x-argus-code': c.code } });
+  if (!r.ok) { const e = new Error(String(r.status)); e.status = r.status; throw e; }
+  return r.blob();
+}
+const fmtWhen = t => new Date(t).toLocaleString('nb-NO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+const ibTitle = it => { const t = (it.text || '').replace(/\s+/g, ' ').trim(); return t.length > 70 ? t.slice(0, 67) + '…' : t; };
+async function loadInboxPics() {
+  let any = false;
+  for (const it of S.inbox || []) {
+    if (it.status !== 'ny') continue;
+    for (let i = 0; i < (it.pics || 0); i++) {
+      const k = it.id + ':' + i; if (S.inboxPics[k]) continue;
+      try { S.inboxPics[k] = URL.createObjectURL(await hubBlob(`/inbox/${it.id}/pic/${i}`)); any = true; } catch (e) { S.inboxPics[k] = ''; }
+    }
+  }
+  if (any && S.view === 'inbox') { const y = window.scrollY; render(); window.scrollTo(0, y); }
+}
+function renderInbox() {
+  const all = S.inbox || [], ny = all.filter(x => x.status === 'ny'), done = all.filter(x => x.status !== 'ny').slice(0, 10);
+  let h = '';
+  if (!ny.length) h += '<p class="empty">Ingen nye innmeldinger.</p>';
+  h += ny.map(it => {
+    const ed = S.ibEdit[it.id] || {}, site = ed.site ?? (it.site === 'ukjent' ? '' : it.site);
+    return `<section class="panel ib"><div class="ib-top"><strong>${esc(it.name)}</strong> <a href="tel:${esc(it.phone.replace(/[^\d+]/g, ''))}">${esc(it.phone)}</a><span class="muted small">${esc(fmtWhen(it.at))}</span></div>
+      <p class="ib-text">${esc(it.text)}</p>
+      ${it.pics ? `<div class="ib-pics">${Array.from({ length: it.pics }, (_, i) => S.inboxPics[it.id + ':' + i] ? `<img src="${S.inboxPics[it.id + ':' + i]}" alt="Bilde ${i + 1} fra innmeldingen">` : '<span class="muted small">Laster bilde …</span>').join('')}</div>` : ''}
+      <label class="fld"><span>Bygg</span><select class="inp" data-ib="site" data-id="${it.id}"><option value="">Velg bygg</option>${SITES.map(x => `<option value="${x.id}"${x.id === site ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
+      <label class="fld"><span>Tittel på kortet i Trello</span><input class="inp" data-ib="title" data-id="${it.id}" value="${esc(ed.title ?? ibTitle(it))}"></label>
+      <div class="row-btns"><button class="btn primary" data-act="ib-ok" data-id="${it.id}">Godkjenn til Trello</button><button class="btn" data-act="ib-no" data-id="${it.id}">Avvis</button></div></section>`;
+  }).join('');
+  if (done.length) h += `<section><h2 class="h2">Behandlet</h2><div class="list">${done.map(x => `<div class="mrow"><span class="rc-title">${esc(ibTitle(x))}</span><span class="rc-sub">${esc(fmtWhen(x.handledAt || x.at))} · ${x.status === 'godkjent' ? 'Godkjent' + (x.by ? ' av ' + esc(x.by) : '') : 'Avvist'}${x.card ? ` · <a href="${esc(x.card)}" target="_blank" rel="noopener">Åpne kort ↗</a>` : ''}</span></div>`).join('')}</div></section>`;
+  return h;
+}
+async function extLabel() {
+  const t = S.settings.trello; t.labels ||= {};
+  if (t.labels['Ekstern melding']) return t.labels['Ekstern melding'];
+  const all = await tfetch('GET', `boards/${TRELLO.board}/labels`, { fields: 'name,color', limit: 100 });
+  let l = all.find(x => (x.name || '').toLowerCase() === 'ekstern melding');
+  if (!l) l = await tfetch('POST', 'labels', { name: 'Ekstern melding', color: 'blue', idBoard: TRELLO.board });
+  t.labels['Ekstern melding'] = l.id; saveSettings(); return l.id;
+}
+async function ibApprove(id, btn) {
+  const it = (S.inbox || []).find(x => x.id === id); if (!it || S.ibBusy) return;
+  const ed = S.ibEdit[id] ||= {}, siteId = ed.site ?? (it.site === 'ukjent' ? '' : it.site), site = SITES.find(x => x.id === siteId);
+  if (!site) { toast('Velg bygg først.'); return; }
+  const listId = TRELLO.lists[site.tl]; if (!listId) { toast('Fant ikke Trello-listen for bygget.'); return; }
+  if (!navigator.onLine) { toast('Du må ha nett for å godkjenne.'); return; }
+  S.ibBusy = true; if (btn) { btn.disabled = true; btn.textContent = 'Sender …'; }
+  try {
+    if (!ed.cardId) {
+      const lab = await extLabel().catch(() => null);
+      const desc = `**Ekstern melding** (${fmtWhen(it.at)})\n**Fra:** ${it.name}, ${it.phone}\n**Bygg:** ${site.name}\n\n${it.text}`;
+      const params = { idList: listId, name: (ed.title ?? ibTitle(it)).trim() || ibTitle(it), desc, pos: 'top' }; if (lab) params.idLabels = lab;
+      const c = await tfetch('POST', 'cards', params); ed.cardId = c.id; ed.cardUrl = c.shortUrl || c.url || ''; ed.pics = 0;
+    }
+    for (let i = ed.pics || 0; i < (it.pics || 0); i++) {
+      const blob = await hubBlob(`/inbox/${id}/pic/${i}`); const f = new FormData(); f.append('file', blob, `bilde-${i + 1}.jpg`); f.append('name', `Bilde ${i + 1}`);
+      await tfetch('POST', `cards/${ed.cardId}/attachments`, {}, f); ed.pics = i + 1;
+    }
+    await hubFetch('PUT', `/inbox/${id}/status`, { status: 'godkjent', card: ed.cardUrl });
+    it.status = 'godkjent'; it.card = ed.cardUrl; it.by = S.settings.by; it.handledAt = Date.now(); delete S.ibEdit[id];
+    toast('Sendt til Trello', 3000);
+  } catch (e) { toast(e.status ? trelloErr(e) : 'Kunne ikke godkjenne: ' + (e.message || e), 7000); }
+  S.ibBusy = false; render();
+}
+async function ibReject(id) {
+  const it = (S.inbox || []).find(x => x.id === id); if (!it) return;
+  try { await hubFetch('PUT', `/inbox/${id}/status`, { status: 'avvist' }); it.status = 'avvist'; it.by = S.settings.by; it.handledAt = Date.now(); toast('Avvist', 2500); }
+  catch (e) { toast(hubErr(e), 6000); }
+  render();
+}
 const MONTHS = ['januar', 'februar', 'mars', 'april', 'mai', 'juni', 'juli', 'august', 'september', 'oktober', 'november', 'desember'];
 function monthRows(siteId) {
   const ym = todayISO().slice(0, 7), byId = {};
