@@ -58,3 +58,14 @@ Hub tillater bare kallene appen trenger mot tavlen Vaktmester. Bytter du token i
 4. Avsender skriver bygg eller leietaker i fritekst (ingen bygg vises på siden, så den kan brukes for flere kunder). I Argus dukker meldinger opp som «Innmeldinger» på forsiden (oppdateres ved synk, eller trykk Oppdater nå). Velg bygg, rediger tittel og trykk Godkjenn til Trello. Kortet får etikett «Ekstern melding», bilder og kontaktinfo.
 
 Vern: robotsjekk (Turnstile), skjult felt mot roboter, maks 5 meldinger per time per avsender, maks 100 per døgn totalt, maks 3 JPEG-bilder per melding og 6 MB totalt. Meldinger og bilder slettes automatisk etter 90 dager.
+
+## Varsel på telefonen (Pushover)
+
+Hub sender et varsel («Ny innmelding venter på godkjenning») hver gang noen sender inn via meldingssiden. Varselet har ingen navn, telefonnummer eller tekst.
+
+1. Installer Pushover på telefonen og opprett en konto (pushover.net). Gratis i 30 dager, deretter engangskjøp på ca. 5 USD.
+2. På pushover.net: Create an Application/API Token. Navn `Argus`, ikon `icon-512.png`.
+3. Worker → Variables and Secrets → secrets `PUSHOVER_USER` (User Key) og `PUSHOVER_TOKEN` (Application Token).
+4. Lim inn nyeste `hub/worker.js` og Deploy.
+
+Uten disse secretene sendes ingen varsler, og meldinger fungerer som før. Feil hos Pushover stopper aldri en innmelding.

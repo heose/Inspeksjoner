@@ -39,6 +39,19 @@ const MELD_TTL = 90 * 86400, MAX_BODY = 6 * 1024 * 1024, MAX_PICS = 3, MAX_PIC_C
 const MELD_PER_HOUR = 5, MELD_PER_DAY = 100;
 const fromB64 = s => { const bin = atob(s); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; };
 
+// Varsel til telefonen via Pushover. Ingen persondata i varselet. Feil her skal aldri stoppe innmeldingen.
+async function varsle(env) {
+  const token = SECRET(env, 'pushover_token'), user = SECRET(env, 'pushover_user');
+  if (!token || !user) return;
+  try {
+    await fetch('https://api.pushover.net/1/messages.json', {
+      method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ token, user, title: 'Argus', message: 'Ny innmelding venter på godkjenning', url: 'https://heose.github.io/Inspeksjoner/', url_title: 'Åpne Argus' }).toString(),
+      signal: AbortSignal.timeout ? AbortSignal.timeout(4000) : undefined,
+    });
+  } catch (e) { /* ignorer */ }
+}
+
 async function melding(req, env) {
   const o = req.headers.get('Origin');
   if (o && !ORIGINS.includes(o)) return json(req, { error: 'Ikke tillatt' }, 403);
@@ -78,6 +91,7 @@ async function melding(req, env) {
   const id = crypto.randomUUID();
   for (let i = 0; i < bytes.length; i++) await env.ARGUS.put(`inboxpic:${id}:${i}`, bytes[i], { expirationTtl: MELD_TTL });
   await env.ARGUS.put(`inbox:${id}`, JSON.stringify({ id, at: Date.now(), status: 'ny', where, text, name, phone, pics: bytes.length }), { expirationTtl: MELD_TTL });
+  await varsle(env);
   return json(req, { ok: true });
 }
 
