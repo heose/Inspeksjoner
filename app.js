@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-01 z';
+const APP_VERSION = '2026-11-01 å';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -362,6 +362,7 @@ function renderHome() {
       <p class="muted small">Alt ligger bare på denne telefonen. Ta en kopi jevnlig og legg den i iCloud Drive eller Google Drive.</p>
       <div class="row-btns"><button class="btn" data-act="export">Lag sikkerhetskopi</button><button class="btn" data-act="import">Gjenopprett fra fil</button></div>
     </section>`;
+    return h;
   }
 
   if (drafts.length) {
@@ -635,7 +636,7 @@ document.addEventListener('click', async e => {
     case 'avvik-new': newAvvik({ site: b.dataset.site }); break;
     case 'av-site': if (ins) { ins.siteId = b.dataset.id; ins.anl = null; ins.annet = false; S.settings.lastSite = ins.siteId; saveSettings(); avSite(ins); touch(ins); render(); } break;
     case 'to-site': openSite(S.site); break;
-    case 'settings': S.showSettings = !S.showSettings; render(); break;
+    case 'settings': S.showSettings = !S.showSettings; render(); window.scrollTo(0, 0); break;
     case 'new': newInspection(b.dataset.tpl); break;
     case 'open': openIns(b.dataset.id); if (b.dataset.focus) { const el = document.getElementById('it-' + b.dataset.focus); if (el) el.scrollIntoView({ block: 'center' }); } break;
     case 'hist-all': S.showAllHist = true; render(); break;
