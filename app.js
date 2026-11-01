@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-01 å8';
+const APP_VERSION = '2026-11-01 å9';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -122,9 +122,9 @@ function toneFor(it, v) {
 }
 function secVisible(sec, ins) {
   const c = sec.showIf; if (!c) return true;
-  if (c.legacy) return Object.keys(ins.answers).some(k => k.startsWith(c.legacy + '#'));
+  if (c.legacy) return Object.keys(ins.answers).some(k => k.startsWith(c.legacy + '#') || k.startsWith(c.legacy + '.'));
   const v = ins.answers[c.item]?.value;
-  if (c.includes) return Array.isArray(v) && v.includes(c.includes);
+  if (c.includes) return Array.isArray(v) ? v.includes(c.includes) : !!c.orUnset && v == null;   // orUnset: vises også når «Hvilket sted» aldri er besvart (nye VK-inspeksjoner)
   return true;
 }
 function itemVisible(it, ins, prefix) {
@@ -201,6 +201,7 @@ function dueInfo(t, last) {
   if (day >= 20) return { cls: 'warn', text: 'Forfaller ' + fmt(end), date: end };
   return { cls: 'blue', text: 'Frist ' + fmt(end), date: end };
 }
+const covOf = (c, ins) => c.t === ins.templateId || (c.alt || []).includes(ins.templateId);   // alt: eldre mal-id som fortsatt teller (VK/SVK ble delt i å9)
 function covMatch(c, key, ins) {
   const dot = key.indexOf('.'), p = key.slice(0, dot), id = key.slice(dot + 1), sec = p.split('#')[0];
   if (c.x.includes(id)) return false;
@@ -225,14 +226,14 @@ function anlState(a) {
   for (const c of a.cov) {
     const t = TPL[c.t]; let last = null, lastFlags = [];
     for (const i of done) {
-      if (i.templateId !== c.t) continue;
+      if (!covOf(c, i)) continue;
       const items = covItems(c, i).filter(x => answered(i.answers[x.key]) || (i.answers[x.key]?.actions || []).length);
       if (!items.length) continue;
       const flags = items.filter(x => isFlag(x.it, i.answers[x.key]));
       hist.push({ i, t, n: items.length, flags });
       if (!last) { last = i; lastFlags = flags.filter(x => unresolved(i.answers[x.key])); }
     }
-    for (const i of all) if (i.templateId === c.t) for (const [key, ans] of Object.entries(i.answers))
+    for (const i of all) if (covOf(c, i)) for (const [key, ans] of Object.entries(i.answers))
       for (const act of ans.actions || []) if (!act.done && covMatch(c, key, i)) open.push(locItem(i, key, act));
     let remote = null; const ck = a.id + '|' + a.cov.indexOf(c);
     for (const r of hubRows()) if (Array.isArray(r.ac) && r.ac.includes(ck) && r.date && (!remote || r.date > remote)) remote = r.date;
@@ -441,8 +442,11 @@ function actLine(x, withSite) {
 }
 const allOpen = openAll;
 function lastOf(tid, done) {
-  const l = done.find(i => i.templateId === tid); let d = l ? l.date : null;
-  for (const r of hubRows()) if (r.tpl === tid && r.date && (!d || r.date > d)) d = r.date;
+  /* Mal med legacy: [eldre mal-id] teller også for eldre inspeksjoner som dekket anlegg på samme bygg (VK/SVK-malen før å9). */
+  const leg = TPL[tid]?.legacy || [], site = leg.length ? SITES.find(s => s.tpls.includes(tid))?.id : null;
+  const own = ac => Array.isArray(ac) && ac.some(k => ANL[String(k).split('|')[0]]?.site === site);
+  const l = done.find(i => i.templateId === tid || (leg.includes(i.templateId) && own(covKeys(i)))); let d = l ? l.date : null;
+  for (const r of hubRows()) if ((r.tpl === tid || (leg.includes(r.tpl) && own(r.ac))) && r.date && (!d || r.date > d)) d = r.date;
   return d ? { date: d } : undefined;
 }
 const doneList = () => Object.values(S.ins).filter(i => i.status === 'complete').sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.updatedAt - a.updatedAt);
@@ -1356,7 +1360,7 @@ const hubRec = i => ({ id: i.id, tpl: i.templateId, name: TPL[i.templateId]?.nam
 /* ---------- Delte handlinger via Hub ----------
    Bare handlinger fra fullførte inspeksjoner deles. Kladder er lokale. «Utført» avgjøres av siste endring (upd). */
 const persistActs = () => { try { localStorage.setItem('insp-acts', JSON.stringify({ items: S.hubActs })); } catch (e) {} };
-const actAnl = (ins, key) => [...new Set(ANLEGG.filter(a => a.cov.some(c => c.t === ins.templateId && covMatch(c, key, ins))).map(a => a.id).concat(ins.anl ? [ins.anl] : []))];
+const actAnl = (ins, key) => [...new Set(ANLEGG.filter(a => a.cov.some(c => covOf(c, ins) && covMatch(c, key, ins))).map(a => a.id).concat(ins.anl ? [ins.anl] : []))];
 const actRec = (ins, key, act) => ({ id: act.id, iid: ins.id, key, text: act.text || '', due: act.due || '', who: act.who || '', prio: act.prio || 'Lav', done: !!act.done, doneAt: act.doneAt || '', doneBy: act.doneBy || '', closedIn: act.closedIn || '',
   tr: act.trello?.id ? { id: act.trello.id, url: act.trello.url || '' } : null, tpl: TPL[ins.templateId]?.name || '', tplId: ins.templateId, siteId: actSite(ins, key) || insSite(ins) || '', date: ins.date || '', by: ins.by || '', anl: actAnl(ins, key), upd: act.upd || 0 });
 async function pushRemoteEdits() {
@@ -1412,7 +1416,7 @@ async function toggleRemoteAct(id, checked) {
 function covKeys(i) {
   const out = [];
   for (const a of ANLEGG) a.cov.forEach((c, ci) => {
-    if (c.t !== i.templateId) return;
+    if (!covOf(c, i)) return;
     if (covItems(c, i).some(x => answered(i.answers[x.key]) || (i.answers[x.key]?.actions || []).length)) out.push(a.id + '|' + ci);
   });
   return out;
