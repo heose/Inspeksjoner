@@ -3,6 +3,7 @@
 // Bindinger: KV-namespace "ARGUS".
 // Secrets: CODE (felles kode, administrator), eller CODES (JSON: {"henrik":"kode1","kari":"kode2"}) og ADMINS (navn, kommaseparert).
 // Ekstern innmelding: secret TURNSTILE_SECRET (robotsjekk). Åpen adresse: POST /melding. Resten krever kode.
+// Snøvarsel: Cron Trigger (0 */3 * * *) + secrets PUSHOVER_*, TRELLO_*. Test: GET /snow og POST /snow?test=1.
 
 const ORIGINS = ['https://heose.github.io', 'http://localhost:8000', 'http://127.0.0.1:8000'];
 const MAX_PDF = 20 * 1024 * 1024, MAX_CONTENT = 1024 * 1024;
@@ -40,16 +41,106 @@ const MELD_PER_HOUR = 5, MELD_PER_DAY = 100;
 const fromB64 = s => { const bin = atob(s); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; };
 
 // Varsel til telefonen via Pushover. Ingen persondata i varselet. Feil her skal aldri stoppe innmeldingen.
-async function varsle(env) {
+// Uten argument: standardvarselet om ny innmelding. Returnerer true hvis Pushover tok imot varselet.
+async function varsle(env, o = {}) {
   const token = SECRET(env, 'pushover_token'), user = SECRET(env, 'pushover_user');
-  if (!token || !user) return;
+  if (!token || !user) return false;
   try {
-    await fetch('https://api.pushover.net/1/messages.json', {
+    const r = await fetch('https://api.pushover.net/1/messages.json', {
       method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ token, user, title: 'Argus', message: 'Ny innmelding venter på godkjenning', url: 'https://heose.github.io/Inspeksjoner/', url_title: 'Åpne Argus' }).toString(),
+      body: new URLSearchParams({ token, user, title: o.title || 'Argus', message: o.message || 'Ny innmelding venter på godkjenning', url: o.url || 'https://heose.github.io/Inspeksjoner/', url_title: o.urlTitle || 'Åpne Argus' }).toString(),
       signal: AbortSignal.timeout ? AbortSignal.timeout(4000) : undefined,
     });
-  } catch (e) { /* ignorer */ }
+    return r.ok;
+  } catch (e) { return false; }
+}
+
+// ---------- Snøvarsel (Cron Trigger, f.eks. hver 3. time) ----------
+// Henter prognosen fra MET (Locationforecast 2.0). Ved snø de neste 24 timene sendes push (Pushover)
+// og det lages et Trello-kort med sjekkliste på Olsrød Park-listen. Maks ett varsel per 18 timer.
+// Cron settes i Cloudflare: Settings → Trigger Events → Cron Triggers → 0 */3 * * *
+const SNOW = {
+  name: 'Olsrød Park', lat: 59.30, lon: 10.40,       // Tolvsrød, Tønsberg. Omtrentlig punkt, justér ved behov.
+  list: '69fd92efa0fbbbd4a10fc0ee',                  // Trello-liste for OP på tavla Vaktmester
+  maxTemp: 1.0,                                      // °C: nedbør ved og under dette regnes som snø
+  minHour: 0.1,                                      // mm/t som må til for å telle
+  mm12: 2.0,                                         // varsel når summen i et 12-timersvindu når dette (≈ 2 cm våt snø)
+  months: [10, 11, 0, 1, 2],                         // nov–mar (JS: 0 = januar)
+  quiet: 18 * 3600,                                  // sekunder mellom varsler
+  ua: 'ArgusHub/1.0 github.com/heose/Inspeksjoner',  // MET krever identifiserbar User-Agent
+};
+const SNOW_TODO = [
+  'Merke p-plasser (snørydding)',
+  'Sjekke at rømningsveier og nødutganger er frie for snø og is',
+  'Brøyte/strø inngangsparti, varemottak og rømningsveier',
+  'Sjekke at atkomst for brannvesen, brannkum og sprinklerinntak er fri',
+  'Sjekke tak, nedløp og sluk',
+  'Sjekke at ytterdører og porter fungerer',
+  'Varsle leietakere ved behov',
+];
+const osloDay = d => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Oslo' }).format(d);
+const osloClock = d => new Intl.DateTimeFormat('nb-NO', { timeZone: 'Europe/Oslo', hour: '2-digit', minute: '2-digit' }).format(d);
+
+async function snowForecast(now = new Date()) {
+  const r = await fetch(`https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=${SNOW.lat.toFixed(4)}&lon=${SNOW.lon.toFixed(4)}`, {
+    headers: { 'User-Agent': SNOW.ua },
+    signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
+  });
+  if (!r.ok) throw new Error('MET ' + r.status);
+  const j = await r.json(), t0 = now.getTime(), hours = [];
+  for (const e of (j.properties && j.properties.timeseries) || []) {
+    const t = Date.parse(e.time), h1 = e.data && e.data.next_1_hours;
+    if (!h1 || t + 3600e3 <= t0 || t >= t0 + 24 * 3600e3) continue;
+    const temp = e.data.instant.details.air_temperature, mm = (h1.details && h1.details.precipitation_amount) || 0, sym = (h1.summary && h1.summary.symbol_code) || '';
+    const snowy = /snow|sleet/.test(sym) || (temp <= SNOW.maxTemp && mm >= SNOW.minHour);
+    hours.push({ t, temp, mm, sym, snowy, snow: snowy ? mm : 0 });
+  }
+  let peak = 0, at = -1;
+  for (let i = 0; i < hours.length; i++) {
+    let s = 0; for (let k = i; k < Math.min(i + 12, hours.length); k++) s += hours[k].snow;
+    if (s > peak) { peak = s; at = i; }
+  }
+  const win = at < 0 ? [] : hours.slice(at, at + 12), first = win.find(h => h.snowy);
+  return {
+    trigger: peak >= SNOW.mm12 && !!first, peak: Math.round(peak * 10) / 10, start: first ? first.t : null,
+    tmin: win.length ? Math.min(...win.map(h => h.temp)) : null, n: hours.length,
+    hours: hours.map(h => ({ t: new Date(h.t).toISOString(), temp: h.temp, mm: h.mm, sym: h.sym, snowy: h.snowy })),
+  };
+}
+
+async function snowCard(env, f, msg) {
+  const key = SECRET(env, 'trello_key'), token = SECRET(env, 'trello_token');
+  if (!key || !token) return null;
+  const tr = async (path, params) => {
+    const u = new URL('https://api.trello.com/1/' + path);
+    u.searchParams.set('key', key); u.searchParams.set('token', token);
+    for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+    const r = await fetch(u.toString(), { method: 'POST' });
+    if (!r.ok) throw new Error('Trello ' + r.status);
+    return r.json();
+  };
+  const due = new Date(Math.max(Date.now() + 3600e3, f.start - 2 * 3600e3)).toISOString();
+  const c = await tr('cards', { idList: SNOW.list, pos: 'top', due, name: `Snøberedskap ${SNOW.name} – ${osloDay(new Date(f.start))}`, desc: msg + '\n\nKilde: MET Locationforecast. Opprettet automatisk av Argus Hub.' });
+  try {
+    const cl = await tr(`cards/${c.id}/checklists`, { name: 'Snøberedskap' });
+    for (const x of SNOW_TODO) await tr(`checklists/${cl.id}/checkItems`, { name: x });
+  } catch (e) { /* kortet finnes uansett */ }
+  return { id: c.id, shortUrl: c.shortUrl };
+}
+
+// o.dry: bare analyse. o.force: hopp over sesong. Ellers full kjøring med dempning og utsending.
+async function snowCheck(env, o = {}) {
+  const now = new Date();
+  if (!o.force && !SNOW.months.includes(now.getUTCMonth())) return { skipped: 'utenfor sesong' };
+  const f = await snowForecast(now);
+  if (o.dry || !f.trigger) return { ...f, sent: false };
+  if (await env.ARGUS.get('snow:last')) return { ...f, sent: false, quiet: true };
+  const mm = f.peak.toFixed(f.peak < 10 ? 1 : 0).replace('.', ',');
+  const msg = `Snø ventet ved ${SNOW.name} fra kl. ${osloClock(new Date(f.start))}: ca. ${mm} mm nedbør (omtrent ${Math.round(f.peak)}–${Math.round(f.peak * 2)} cm snø) i løpet av 12 t, ned til ${Math.round(f.tmin)} °C.`;
+  let card = null; try { card = await snowCard(env, f, msg); } catch (e) { /* push går uansett */ }
+  const pushed = await varsle(env, { title: 'Argus – snø', message: msg + (card ? ' Trello-kort er laget.' : ''), url: card && card.shortUrl, urlTitle: card ? 'Åpne kortet' : undefined });
+  if (card || pushed) await env.ARGUS.put('snow:last', JSON.stringify({ at: Date.now(), card: card && card.shortUrl }), { expirationTtl: SNOW.quiet });
+  return { ...f, sent: !!(card || pushed), pushed, card: card && card.shortUrl };
 }
 
 async function melding(req, env) {
@@ -109,6 +200,9 @@ const json = (req, data, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { ...cors(req), 'content-type': 'application/json' } });
 
 export default {
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(snowCheck(env).catch(e => console.log('snow: ' + (e && e.message || e))));
+  },
   async fetch(req, env) {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(req) });
     const url = new URL(req.url);
@@ -125,6 +219,16 @@ export default {
     try {
       // GET /ping
       if (req.method === 'GET' && p[0] === 'ping') return json(req, { ok: true, ts: Date.now() });
+
+      // GET /snow  –  analyse av prognosen uten å sende noe.  POST /snow (bare administrator): kjør som cron.  POST /snow?test=1: send testvarsel.
+      if (p[0] === 'snow' && !p[1]) {
+        if (req.method === 'GET') return json(req, await snowCheck(env, { dry: true, force: true }));
+        if (req.method === 'POST') {
+          if (!user.admin) return json(req, { error: 'Bare administrator' }, 403);
+          if (url.searchParams.get('test')) return json(req, { ok: await varsle(env, { title: 'Argus – test', message: 'Testvarsel for snøvarsling' }) });
+          return json(req, await snowCheck(env));
+        }
+      }
 
       // /trello/<sti>  – videresendes til api.trello.com/1/<sti>
       if (p[0] === 'trello') {
