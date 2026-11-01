@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-01 å11';
+const APP_VERSION = '2026-11-01 å12';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -147,7 +147,7 @@ function* walk(tpl, ins) {
   }
 }
 function stats(ins) {
-  const r = { flags: 0, actions: 0, open: 0, unanswered: 0, total: 0, photos: 0 };
+  const r = { flags: 0, actions: 0, open: 0, unanswered: 0, total: 0, photos: 0, warn: 0 };
   for (const x of walk(TPL[ins.templateId], ins)) {
     if (x.it.type === 'heading' || x.it.type === 'info') continue;
     const a = ins.answers[x.key];
@@ -156,9 +156,12 @@ function stats(ins) {
     r.actions += acts.length; r.open += acts.filter(z => !z.done).length;
     r.photos += (a?.photos || []).length;
     if (['yn', 'ok', 'okm', 'choice', 'multi', 'number'].includes(x.it.type)) {
-      r.total++;
-      const v = a?.value;
-      if (v == null || v === '' || (Array.isArray(v) && !v.length)) r.unanswered++;
+      if (!x.it.opt) {
+        r.total++;
+        const v = a?.value;
+        if (v == null || v === '' || (Array.isArray(v) && !v.length)) r.unanswered++;
+      }
+      if ((x.it.meter || x.it.calc) && ins.status !== 'complete' && meterCheck(ins, x.it, x.key).level) r.warn++;
     }
   }
   return r;
@@ -169,7 +172,82 @@ function findItem(tpl, key) {
   const sec = tpl.sections.find(s => s.id === secId);
   return { sec, it: sec?.items.find(i => i.id === id), inst: p.includes('#') ? +p.split('#')[1] : 0 };
 }
+/* ---------- Måleravlesning: forrige verdi (med historikk fra innholdsfilen), forbruk, advarsler og netto VV ---------- */
+const numOf = v => { if (v == null || v === '') return null; const n = Number(String(v).replace(/[\s\u00a0]/g, '').replace(',', '.')); return Number.isFinite(n) ? n : null; };
+const nbsp = n => { const [i, d] = String(Math.round(n * 100) / 100).split('.'); return i.replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0') + (d ? ',' + d : ''); };
+const hasMeters = tpl => (tpl._hm ??= tpl.sections.some(s => s.items.some(i => i.meter || i.calc)));
+function meterSeries(ins, key) {
+  const tpl = TPL[ins.templateId], m = new Map(), dmax = ins.date || '9';
+  for (const h of tpl.history || []) { const v = numOf(h.v && h.v[key]); if (v != null && h.d <= dmax) m.set(h.d, v); }
+  for (const i of Object.values(S.ins)) if (i.id !== ins.id && i.templateId === ins.templateId && i.status === 'complete' && (i.date || '') <= dmax) { const v = numOf(i.answers[key]?.value); if (v != null) m.set(i.date, v); }
+  return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([d, v]) => ({ d, v }));
+}
+function meterCheck(ins, it, key) {
+  const ser = meterSeries(ins, key), prev = ser[ser.length - 1] || null, v = numOf(ins.answers[key]?.value);
+  const r = { prev, v, diff: null, typical: null, level: null };
+  if (v == null) return r;
+  if (it.calc && v < 0) { r.level = 'neg'; return r; }
+  if (!prev) return r;
+  r.diff = v - prev.v;
+  const d = []; for (let i = 1; i < ser.length; i++) { const x = ser[i].v - ser[i - 1].v; if (x >= 0) d.push(x); }
+  const last = d.slice(-6).sort((a, b) => a - b);
+  if (last.length >= 3) r.typical = last[Math.floor(last.length / 2)];
+  if (r.diff < 0) r.level = 'low';
+  else if (r.typical != null && r.diff > r.typical * 2.5 && r.diff - r.typical >= 8) r.level = 'high';
+  return r;
+}
+function meterHint(ins, it, key) {
+  const c = meterCheck(ins, it, key), u = esc(it.unit || ''); let h = '';
+  if (c.prev) h += `<span class="prev">Forrige: ${nbsp(c.prev.v)} ${u} (${fmt(c.prev.d).slice(0, 5)})</span>`;
+  if (c.diff != null && c.level !== 'low') h += `<span class="muted small">Forbruk siden forrige: ${c.diff >= 0 ? '+' : ''}${nbsp(c.diff)} ${u}</span>`;
+  if (c.level === 'low') h += `<span class="t-bad small">Lavere enn forrige avlesning (${nbsp(c.diff)} ${u}). En måler teller bare oppover, så sjekk tallet.</span>`;
+  else if (c.level === 'high') h += `<span class="t-warn small">Uvanlig høyt. Vanlig er ca. ${nbsp(c.typical)} ${u} per måned. Kontroller avlesningen.</span>`;
+  else if (c.level === 'neg') h += `<span class="t-bad small">Sirkulasjon er høyere enn varmtvann. Sjekk begge tallene.</span>`;
+  return h;
+}
+/* Netto varmtvann = varmtvann minus sirkulasjon (tom sirkulasjon regnes som 0). Lagres som vanlig svar, så PDF og historikk virker som før. */
+function syncCalc(ins) {
+  const tpl = TPL[ins.templateId]; let ch = false;
+  for (const sec of tpl.sections) if (!sec.repeat) for (const it of sec.items) if (it.calc) {
+    const k = sec.id + '.' + it.id, a = numOf(ins.answers[it.calc.a]?.value), m = numOf(ins.answers[it.calc.minus]?.value) ?? 0;
+    const v = a == null ? null : String(Math.round((a - m) * 100) / 100), old = ins.answers[k]?.value ?? null;
+    if (v !== old && !(v == null && !ins.answers[k])) { A(ins, k).value = v; ch = true; }
+  }
+  return ch;
+}
+function refreshMeters(ins) {
+  const tpl = TPL[ins.templateId]; if (!tpl || !hasMeters(tpl)) return;
+  syncCalc(ins);
+  document.querySelectorAll('[data-mh]').forEach(el => { const { it } = findItem(tpl, el.dataset.mh); if (it) el.innerHTML = meterHint(ins, it, el.dataset.mh); });
+  document.querySelectorAll('[data-cv]').forEach(el => { const v = numOf(ins.answers[el.dataset.cv]?.value); el.textContent = v == null ? '–' : nbsp(v); });
+}
+const MONTHS = ['januar', 'februar', 'mars', 'april', 'mai', 'juni', 'juli', 'august', 'september', 'oktober', 'november', 'desember'];
+function mailRows(ins) {
+  const tpl = TPL[ins.templateId], [y, m, d] = (ins.date || '').split('-');
+  const rows = [['Dato', `${d}.${m}.${(y || '').slice(2)}`]];
+  for (const x of walk(tpl, ins)) if (x.it.mail) { const v = numOf(ins.answers[x.key]?.value); rows.push([typeof x.it.mail === 'string' ? x.it.mail : x.it.label, v == null ? '' : nbsp(v)]); }
+  rows.push(['Navn på innsender', ins.by || '']);
+  return rows;
+}
+async function mailCopy(ins) {
+  if (!ins) return;
+  const rows = mailRows(ins), plain = rows.map(r => r.join('\t')).join('\n');
+  const html = `<table>${rows.map(r => `<tr><td>${esc(r[0])}</td><td style="text-align:right">${esc(r[1])}</td></tr>`).join('')}</table>`;
+  try {
+    if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([plain], { type: 'text/plain' }) })]);
+    else await navigator.clipboard.writeText(plain);
+    toast('Tabellen er kopiert. Lim den inn i e-posten.', 3500);
+  } catch (e) { try { await navigator.clipboard.writeText(plain); toast('Tabellen er kopiert som tekst.', 3500); } catch (e2) { window.prompt('Kopier tabellen', plain); } }
+}
+function mailOpen(ins) {
+  if (!ins) return;
+  const m = TPL[ins.templateId].mail || {}, rows = mailRows(ins), mnd = MONTHS[+(ins.date || '').slice(5, 7) - 1] || '';
+  const body = (m.intro || 'Hei.\n\nHer kommer tallene for {mnd}.').replace('{mnd}', mnd) + '\n\n' + rows.map(r => r.join('\t')).join('\n');
+  const q = [m.cc ? 'cc=' + encodeURIComponent(m.cc) : '', 'subject=' + encodeURIComponent(m.subject || ''), 'body=' + encodeURIComponent(body)].filter(Boolean).join('&');
+  location.href = `mailto:${m.to || ''}?${q}`;
+}
 function prevValue(ins, key) {
+  if (TPL[ins.templateId]?.history) { const s = meterSeries(ins, key); return s.length ? s[s.length - 1].v : null; }
   const list = Object.values(S.ins).filter(i => i.id !== ins.id && i.templateId === ins.templateId && i.status === 'complete' && (i.date || '') <= (ins.date || '9'))
     .sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.updatedAt - a.updatedAt);
   for (const i of list) { const v = i.answers[key]?.value; if (v != null && v !== '') return v; }
@@ -561,10 +639,12 @@ function renderIns() {
   h += `<section class="panel finish">
     <div class="sum"><div><b>${st.total - st.unanswered}</b><span>av ${st.total} besvart</span></div><div class="${st.flags ? 't-bad' : ''}"><b>${st.flags}</b><span>avvik</span></div><div><b>${st.actions}</b><span>handlinger</span></div><div><b>${st.photos}</b><span>bilder</span></div></div>`;
   if (S.confirmFinish) {
-    h += `<p class="warn-text">${st.unanswered} ${st.unanswered === 1 ? 'punkt er' : 'punkter er'} ikke besvart. Vil du fullføre likevel?</p>
+    const finMsg = [st.unanswered ? `${st.unanswered} ${st.unanswered === 1 ? 'punkt er' : 'punkter er'} ikke besvart` : '', st.warn ? `${st.warn} ${st.warn === 1 ? 'avlesning virker' : 'avlesninger virker'} feil (lavere enn forrige, eller uvanlig høy)` : ''].filter(Boolean).join(' og ');
+    h += `<p class="warn-text">${finMsg}. Vil du fullføre likevel?</p>
       <div class="row-btns"><button class="btn" data-act="finish-cancel">Gå tilbake</button><button class="btn primary" data-act="finish-force">Fullfør likevel</button></div>`;
   } else {
     h += `<button class="btn primary big" data-act="${ins.status === 'complete' ? 'pdf' : 'finish'}" data-id="${ins.id}" ${S.busy ? 'disabled' : ''}>${S.busy ? 'Lager PDF…' : ins.status === 'complete' ? 'Lag PDF på nytt' : ins.templateId === 'avvik' ? 'Send avvik' : 'Fullfør og lag PDF'}</button>`;
+    if (ins.status === 'complete' && tpl.mail) h += `<div class="row-btns"><button class="btn" data-act="mail-copy" data-id="${ins.id}">Kopier tabell til e-post</button><button class="btn" data-act="mail-open" data-id="${ins.id}">Åpne e-post</button></div>`;
   }
   h += '</section>';
   return h;
@@ -591,6 +671,11 @@ function itemHTML(ins, it, key) {
   } else if (it.type === 'multi') {
     const v = Array.isArray(a.value) ? a.value : [];
     ctl = `<div class="seg multi">${it.options.map(o => `<button type="button" data-act="toggle" data-key="${k}" data-val="${esc(o)}" aria-pressed="${v.includes(o)}"${v.includes(o) ? ' data-tone="sel"' : ''}>${esc(o)}</button>`).join('')}</div>`;
+  } else if (it.type === 'number' && it.calc) {
+    const cv = numOf(a.value);
+    ctl = `<div class="numrow"><span class="calcv" data-cv="${k}">${cv == null ? '–' : nbsp(cv)}</span><span class="unit">${esc(it.unit || '')}</span><span class="muted small">regnes ut automatisk</span></div><div class="mh" data-mh="${k}">${meterHint(ins, it, key)}</div>`;
+  } else if (it.type === 'number' && it.meter) {
+    ctl = `<div class="numrow"><input class="inp num" id="n-${k}" type="text" inputmode="numeric" data-bind="${k}" data-field="value" value="${esc(a.value ?? '')}" placeholder="0" autocomplete="off"><span class="unit">${esc(it.unit || '')}</span>${it.opt ? '<span class="muted small">valgfri, tom = 0</span>' : ''}</div><div class="mh" data-mh="${k}">${meterHint(ins, it, key)}</div>`;
   } else if (it.type === 'number') {
     const prev = prevValue(ins, key);
     ctl = `<div class="numrow"><input class="inp num" id="n-${k}" type="text" inputmode="decimal" data-bind="${k}" data-field="value" value="${esc(a.value ?? '')}" placeholder="0,0" autocomplete="off"><span class="unit">${esc(it.unit || '')}</span>${prev != null ? `<span class="prev">Forrige: ${esc(String(prev).replace('.', ','))} ${esc(it.unit || '')}</span>` : ''}</div>`;
@@ -606,11 +691,11 @@ function itemHTML(ins, it, key) {
   return `<div class="item${flag ? ' is-flag' : ''}" id="it-${k}">
     <div class="q">${esc(it.label)}</div>${it.help ? `<div class="help">${esc(it.help)}</div>` : ''}
     ${ctl}${note}${thumbs}${actsH}
-    <div class="tools">
+    ${it.calc ? '' : `<div class="tools">
       <button type="button" class="tool" data-act="note" data-key="${k}">${a.note != null ? 'Skjul notat' : 'Notat'}</button>
       <button type="button" class="tool" data-act="photo" data-key="${k}">Bilde</button>
       <button type="button" class="tool${want && !acts.length ? ' prompt' : ''}" data-act="act-add" data-key="${k}">+ Handling</button>
-    </div></div>`;
+    </div>`}</div>`;
 }
 function actHTML(key, act, sent) {
   const k = esc(key), base = `${k}|${act.id}`;
@@ -740,12 +825,14 @@ document.addEventListener('click', async e => {
         S.settings.lastSite = ins.siteId; saveSettings();
       }
       const st = stats(ins);
-      if (st.unanswered && !S.confirmFinish) { S.confirmFinish = true; render(); break; }
+      if ((st.unanswered || st.warn) && !S.confirmFinish) { S.confirmFinish = true; render(); break; }
       await finish(ins); break;
     }
     case 'finish-force': await finish(ins); break;
     case 'finish-cancel': S.confirmFinish = false; render(); break;
     case 'pdf': await makePdf(S.ins[b.dataset.id]); break;
+    case 'mail-copy': await mailCopy(S.ins[b.dataset.id]); break;
+    case 'mail-open': mailOpen(S.ins[b.dataset.id]); break;
     case 'recent-pdf': await openRecentPdf(b.dataset.id); break;
     case 'open-file': openFile(); break;
     case 'share-file': shareFile(); break;
@@ -818,6 +905,7 @@ document.addEventListener('input', e => {
   if (el.dataset.bind) {
     const a = A(ins, el.dataset.bind);
     if (el.dataset.field === 'value') a.value = el.value === '' ? null : el.value; else a.note = el.value;
+    if (el.dataset.field === 'value') refreshMeters(ins);
     touch(ins); return;
   }
   if (el.dataset.actf && el.type !== 'checkbox') {
@@ -932,6 +1020,7 @@ function autoActions(ins) {
   return n;
 }
 async function finish(ins) {
+  syncCalc(ins);
   const nAuto = autoActions(ins);
   if (nAuto) toast(`${nAuto} ${nAuto === 1 ? 'påminnelse' : 'påminnelser'} om utløp/kontroll lagt til`, 4000);
   ins.status = 'complete'; ins.completedAt = Date.now(); S.confirmFinish = false;
@@ -1103,7 +1192,7 @@ async function buildReport(ins) {
       const v = a.value; let ans = null, tone = null;
       if (CHOICE_TYPES.includes(it.type) && v) { ans = v; tone = toneFor(it, v); }
       else if (it.type === 'multi' && Array.isArray(v) && v.length) { ans = v.join(', '); tone = 'sel'; }
-      else if (it.type === 'number' && v != null && v !== '') ans = String(v).replace('.', ',') + (it.unit ? ' ' + it.unit : '');
+      else if (it.type === 'number' && v != null && v !== '') ans = (it.meter && numOf(v) != null ? nbsp(numOf(v)) : String(v).replace('.', ',')) + (it.unit ? ' ' + it.unit.replace('³', '3') : '');   // m³ skrives m3 i PDF: ³ vises ikke i alle PDF-lesere
       else if (it.type === 'date' && v) { ans = fmt(v); if (isFlag(it, a)) tone = 'bad'; }
       else if (it.type === 'text' && v) ans = String(v);
       const ph = photosOf(a);
