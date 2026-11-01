@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-01 å12';
+const APP_VERSION = '2026-11-01 å13';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -192,7 +192,7 @@ function meterCheck(ins, it, key) {
   const d = []; for (let i = 1; i < ser.length; i++) { const x = ser[i].v - ser[i - 1].v; if (x >= 0) d.push(x); }
   const last = d.slice(-6).sort((a, b) => a - b);
   if (last.length >= 3) r.typical = last[Math.floor(last.length / 2)];
-  if (r.diff < 0) r.level = 'low';
+  if (r.diff < 0 && !it.calc) r.level = 'low';   // netto VV er differansen mellom to målere og kan synke litt (måletoleranse), så bare rene målere varsles
   else if (r.typical != null && r.diff > r.typical * 2.5 && r.diff - r.typical >= 8) r.level = 'high';
   return r;
 }
