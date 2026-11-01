@@ -48,7 +48,7 @@ async function varsle(env, o = {}) {
   try {
     const r = await fetch('https://api.pushover.net/1/messages.json', {
       method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ token, user, title: o.title || 'Argus', message: o.message || 'Ny innmelding venter på godkjenning', url: o.url || 'https://heose.github.io/Inspeksjoner/', url_title: o.urlTitle || 'Åpne Argus' }).toString(),
+      body: new URLSearchParams({ token, user, title: o.title || 'Argus', message: o.message || 'Ny innmelding venter på godkjenning', url: o.url || 'https://argus.osebergdrift.no/', url_title: o.urlTitle || 'Åpne Argus' }).toString(),
       signal: AbortSignal.timeout ? AbortSignal.timeout(4000) : undefined,
     });
     return r.ok;
