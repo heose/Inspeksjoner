@@ -96,6 +96,10 @@ button.mrow:active { background: var(--surface-2); }
 .mrow .pdf-tag { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); color: var(--accent); font-weight: 650; font-size: 14px; }
 .row-card, .act-line { display: flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding-right: 8px; }
 .act-line { padding-left: 14px; }
+.act-line.prio-hoy { background: var(--bad-soft); border-color: var(--bad); border-left-width: 5px; }
+.act-line.prio-mid { background: var(--warn-soft); border-color: var(--warn); border-left-width: 5px; }
+.act-line.prio-lav { background: var(--blue-soft); border-color: var(--blue); border-left-width: 5px; }
+.prio-hoy .prio-tag { color: var(--bad); } .prio-mid .prio-tag { color: var(--warn); } .prio-lav .prio-tag { color: var(--blue); }
 .act-line input { width: 24px; height: 24px; accent-color: var(--ok); flex: none; }
 .row-main { flex: 1; min-width: 0; text-align: left; border: 0; background: none; padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; border-radius: var(--r); }
 .rc-title { font-weight: 600; } .rc-sub { font-size: 14px; color: var(--muted); }

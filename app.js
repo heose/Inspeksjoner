@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-01 å';
+const APP_VERSION = '2026-11-01 å2';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -231,8 +231,11 @@ function anlState(a) {
     }
     for (const i of all) if (i.templateId === c.t) for (const [key, ans] of Object.entries(i.answers))
       for (const act of ans.actions || []) if (!act.done && covMatch(c, key, i)) open.push({ i, key, act });
-    const next = last ? (t.days ? addDays(last.date, t.days) : addMonths(last.date, t.months)) : null;
-    covs.push({ c, t, last, flags: lastFlags, next, du: dueInfo(t, last), d: next ? daysBetween(todayISO(), next) : null, draft: all.find(i => i.templateId === c.t && i.status !== 'complete') });
+    let remote = null; const ck = a.id + '|' + a.cov.indexOf(c);
+    for (const r of hubRows()) if (Array.isArray(r.ac) && r.ac.includes(ck) && r.date && (!remote || r.date > remote)) remote = r.date;
+    const lastDate = last && (!remote || last.date >= remote) ? last.date : remote;
+    const next = lastDate ? (t.days ? addDays(lastDate, t.days) : addMonths(lastDate, t.months)) : null;
+    covs.push({ c, t, last, lastDate, flags: lastFlags, next, du: dueInfo(t, lastDate ? { date: lastDate } : null), d: next ? daysBetween(todayISO(), next) : null, draft: all.find(i => i.templateId === c.t && i.status !== 'complete') });
   }
   for (const i of all) if (i.anl === a.id) {
     const acts = Object.entries(i.answers).flatMap(([key, ans]) => (ans.actions || []).map(act => ({ key, act })));
@@ -240,7 +243,7 @@ function anlState(a) {
     if (i.status === 'complete') hist.push({ i, t: TPL.avvik, n: 1, flags: acts.map(z => ({ it: { label: (z.act.text || 'Avvik').split('\n')[0] } })) });
   }
   hist.sort((x, y) => (y.i.date || '').localeCompare(x.i.date || ''));
-  const dated = covs.filter(x => x.last).sort((x, y) => rank[x.du.cls] - rank[y.du.cls] || (x.du.date || '').localeCompare(y.du.date || ''));
+  const dated = covs.filter(x => x.lastDate).sort((x, y) => rank[x.du.cls] - rank[y.du.cls] || (x.du.date || '').localeCompare(y.du.date || ''));
   const worst = dated[0], nextDue = worst?.du.date || null;
   const nflag = covs.reduce((n, x) => n + x.flags.length, 0);
   let cls, text;
@@ -403,11 +406,34 @@ function renderHome() {
       <span class="anl-txt"><span class="site-name">${esc(site.name)} <span class="count">${site.short}</span></span>
       <span class="rc-sub ${ss.cls === 'bad' ? 't-bad' : ''}">${esc(ss.text)}</span><span class="rc-sub">${esc(ss.rounds)}</span></span><span class="chev" aria-hidden="true">›</span></button>`;
   }).join('')}</div>${trelloHomeLine()}</section>`;
+  { const all = allOpen();
+    if (all.length) { const shown = S.showAllAct ? all : all.slice(0, 6);
+      h += `<section><h2 class="h2">Åpne handlinger <span class="count">${all.length}</span></h2><div class="list">${shown.map(x => actLine(x, true)).join('')}</div>${all.length > 6 && !S.showAllAct ? `<button class="link more" data-act="act-all">Vis alle ${all.length}</button>` : ''}</section>`; } }
   h += recentHtml(null);
   return h;
 }
 
 const rank = { bad: 0, warn: 1, blue: 2, ok: 3, na: 4 };
+const PRIO_RANK = { 'Høy': 0, 'Middels': 1, 'Lav': 2 }, PRIO_CLS = { 'Høy': 'hoy', 'Middels': 'mid', 'Lav': 'lav' };
+const actSort = (x, y) => (PRIO_RANK[x.act.prio] ?? 3) - (PRIO_RANK[y.act.prio] ?? 3) || (x.act.due || '9').localeCompare(y.act.due || '9');
+function actLine({ i, key, act }, withSite) {
+  const t = TPL[i.templateId], late = act.due && act.due < todayISO(), pr = act.prio || 'Lav';
+  const sh = withSite ? SITES.find(x => x.id === actSite(i, key))?.short : '';
+  return `<div class="act-line prio-${PRIO_CLS[pr] || 'lav'}"><input type="checkbox" id="hd-${act.id}" data-hdone="${i.id}|${esc(key)}|${act.id}" aria-label="Merk som utført">
+      <button class="row-main" data-act="open" data-id="${i.id}" data-focus="${esc(key)}">
+      <span class="rc-title">${esc(act.text || '(uten beskrivelse)')}</span>
+      <span class="rc-sub"><b class="prio-tag">${esc(pr)}</b> · ${sh ? esc(sh) + ' · ' : ''}${esc(t.name)} · ${fmt(i.date)}${act.due ? ` · <span class="${late ? 't-bad' : ''}">Frist ${fmt(act.due)}</span>` : ''}</span></button></div>`;
+}
+function allOpen() {
+  const out = [];
+  for (const i of Object.values(S.ins)) if (TPL[i.templateId]) for (const [key, a] of Object.entries(i.answers)) for (const act of a.actions || []) if (!act.done) out.push({ i, key, act });
+  return out.sort(actSort);
+}
+function lastOf(tid, done) {
+  const l = done.find(i => i.templateId === tid); let d = l ? l.date : null;
+  for (const r of hubRows()) if (r.tpl === tid && r.date && (!d || r.date > d)) d = r.date;
+  return d ? { date: d } : undefined;
+}
 const doneList = () => Object.values(S.ins).filter(i => i.status === 'complete').sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.updatedAt - a.updatedAt);
 const actSite = (i, key) => { const tl = listKey(i, key); return SITES.find(x => x.tl === tl)?.id; };
 function siteOpen(site) {
@@ -422,7 +448,7 @@ function siteState(site) {
   const cls = nbad ? 'bad' : nwarn ? 'warn' : nna === sts.length ? 'na' : nblue ? 'blue' : 'ok';
   const text = nna === sts.length && !nopen ? 'Ingen kontroller i Argus ennå'
     : [nbad ? `${nbad} anlegg med avvik eller forfalt` : '', nwarn ? `${nwarn} forfaller snart` : '', nblue ? `${nblue} skal kontrolleres` : '', nopen ? `${nopen} ${nopen === 1 ? 'åpen handling' : 'åpne handlinger'}` : ''].filter(Boolean).join(' · ') || `Alle ${sts.length} anlegg i orden`;
-  const done = doneList(); const ds = site.tpls.map(id => ({ t: TPL[id], d: dueInfo(TPL[id], done.find(i => i.templateId === id)) }));
+  const done = doneList(); const ds = site.tpls.map(id => ({ t: TPL[id], d: dueInfo(TPL[id], lastOf(id, done)) }));
   const late = ds.filter(x => x.d.cls === 'bad').length, never = ds.filter(x => x.d.cls === 'na').length;
   const rounds = `${site.tpls.length} ${site.tpls.length === 1 ? 'runde' : 'runder'}` + (late ? ` · ${late} forfalt` : '') + (never ? ` · ${never} ikke startet` : '');
   return { cls, text, rounds };
@@ -431,7 +457,7 @@ function siteState(site) {
 function renderSite() {
   const site = SITES.find(x => x.id === S.site), done = doneList();
   const tplBtn = t => {
-    const last = done.find(i => i.templateId === t.id); const due = dueInfo(t, last);
+    const last = lastOf(t.id, done); const due = dueInfo(t, last);
     const draft = Object.values(S.ins).find(i => i.templateId === t.id && i.status !== 'complete');
     return `<div class="tpl-wrap"><button class="tpl" data-act="${draft ? 'open' : 'new'}" data-tpl="${t.id}"${draft ? ` data-id="${draft.id}"` : ''}>
       <span class="tpl-top"><span class="tpl-name">${esc(t.name)}</span><span class="freq">${freqLabel(t)}</span></span>
@@ -450,13 +476,7 @@ function renderSite() {
   h += recentHtml(site.id);
   const open = siteOpen(site);
   h += `<section><h2 class="h2">Åpne handlinger <span class="count">${open.length}</span></h2>${trelloHomeLine()}`;
-  h += open.length ? `<div class="list">${open.map(({ i, key, act }) => {
-    const t = TPL[i.templateId]; const late = act.due && act.due < todayISO();
-    return `<div class="act-line"><input type="checkbox" id="hd-${act.id}" data-hdone="${i.id}|${esc(key)}|${act.id}" aria-label="Merk som utført">
-      <button class="row-main" data-act="open" data-id="${i.id}" data-focus="${esc(key)}">
-      <span class="rc-title">${esc(act.text || '(uten beskrivelse)')}</span>
-      <span class="rc-sub">${esc(t.name)} · ${fmt(i.date)}${act.due ? ` · <span class="${late ? 't-bad' : ''}">Frist ${fmt(act.due)}</span>` : ''}</span></button></div>`;
-  }).join('')}</div>` : '<p class="empty">Ingen åpne handlinger.</p>';
+  h += open.length ? `<div class="list">${open.sort(actSort).map(x => actLine(x)).join('')}</div>` : '<p class="empty">Ingen åpne handlinger.</p>';
   h += '</section>';
   const mine = done.filter(i => site.tpls.includes(i.templateId) || (i.templateId === 'avvik' && (i.siteId || ANL[i.anl]?.site) === site.id));
   const hist = S.showAllHist ? mine : mine.slice(0, 8);
@@ -479,20 +499,14 @@ function renderAnl() {
     <p><span class="pill ${st.cls}">${esc(st.text)}</span></p>
     <button class="btn primary" data-act="avvik" data-id="${a.id}">Meld avvik</button></section>`;
   h += `<section><h2 class="h2">Kontroller</h2><div class="list">${st.covs.map(x => {
-    const due = dueInfo(x.t, x.last);
+    const due = x.du;
     return `<div class="panel cov"><div class="tpl-top"><span class="tpl-name">${esc(x.t.name)}</span><span class="freq">${freqLabel(x.t)}</span></div>
-      <div class="tpl-meta"><span class="pill ${due.cls}">${due.text}</span>${x.last ? `<span class="muted small">Sist ${fmt(x.last.date)}</span>` : ''}</div>
+      <div class="tpl-meta"><span class="pill ${due.cls}">${due.text}</span>${x.lastDate ? `<span class="muted small">Sist ${fmt(x.lastDate)}</span>` : ''}</div>
       ${x.flags.length ? `<ul class="flags">${x.flags.map(f => `<li><button class="link" data-act="open" data-id="${x.last.id}" data-focus="${esc(f.key)}">${esc(f.it.label)}: <b class="t-bad">${esc(String(x.last.answers[f.key].value))}</b></button></li>`).join('')}</ul>` : ''}
       ${x.draft ? `<button class="btn" data-act="open" data-id="${x.draft.id}">Fortsett påbegynt (${fmt(x.draft.date)})</button>` : `<button class="btn primary" data-act="new" data-tpl="${x.t.id}">Start kontroll</button>`}</div>`;
   }).join('')}</div></section>`;
   h += `<section><h2 class="h2">Åpne handlinger <span class="count">${st.open.length}</span></h2>`;
-  h += st.open.length ? `<div class="list">${st.open.sort((x, y) => (x.act.due || '9').localeCompare(y.act.due || '9')).map(({ i, key, act }) => {
-    const t = TPL[i.templateId]; const late = act.due && act.due < todayISO();
-    return `<div class="act-line"><input type="checkbox" id="hd-${act.id}" data-hdone="${i.id}|${esc(key)}|${act.id}" aria-label="Merk som utført">
-      <button class="row-main" data-act="open" data-id="${i.id}" data-focus="${esc(key)}">
-      <span class="rc-title">${esc(act.text || '(uten beskrivelse)')}</span>
-      <span class="rc-sub">${esc(t.name)} · ${fmt(i.date)}${act.due ? ` · <span class="${late ? 't-bad' : ''}">Frist ${fmt(act.due)}</span>` : ''}</span></button></div>`;
-  }).join('')}</div>` : '<p class="empty">Ingen åpne handlinger.</p>';
+  h += st.open.length ? `<div class="list">${st.open.sort(actSort).map(x => actLine(x)).join('')}</div>` : '<p class="empty">Ingen åpne handlinger.</p>';
   h += '</section>';
   h += `<section><h2 class="h2">Historikk</h2>`;
   h += st.hist.length ? `<div class="list">${st.hist.slice(0, 30).map(({ i, t, n, flags }) => `<div class="row-card"><button class="row-main" data-act="open" data-id="${i.id}">
@@ -662,6 +676,7 @@ document.addEventListener('click', async e => {
     case 'new': newInspection(b.dataset.tpl); break;
     case 'open': openIns(b.dataset.id); if (b.dataset.focus) { const el = document.getElementById('it-' + b.dataset.focus); if (el) el.scrollIntoView({ block: 'center' }); } break;
     case 'hist-all': S.showAllHist = true; render(); break;
+    case 'act-all': S.showAllAct = true; render(); break;
     case 'anl-toggle': S.anlOpen = !S.anlOpen; render(); break;
     case 'del-ins':
       if (!b.dataset.armed) { arm(b, 'Bekreft sletting'); break; }
@@ -1329,6 +1344,17 @@ async function hubFetch(method, path, body, raw) {
 }
 const insSite = i => i.siteId || ANL[i.anl]?.site || SITES.find(s => s.tpls.includes(i.templateId))?.id || null;
 const hubRec = i => ({ id: i.id, tpl: i.templateId, name: TPL[i.templateId]?.name || '', siteId: insSite(i), date: i.date, by: i.by || '', at: i.completedAt || i.updatedAt, flags: stats(i).flags || 0 });
+/* Hvilke anlegg/kontroller en inspeksjon dekker. Sendes til Hub, slik at alle telefoner ser hva som er utført. */
+function covKeys(i) {
+  const out = [];
+  for (const a of ANLEGG) a.cov.forEach((c, ci) => {
+    if (c.t !== i.templateId) return;
+    if (covItems(c, i).some(x => answered(i.answers[x.key]) || (i.answers[x.key]?.actions || []).length)) out.push(a.id + '|' + ci);
+  });
+  return out;
+}
+const hubRecSync = i => ({ ...hubRec(i), ac: covKeys(i) });
+const hubRows = () => Object.values(S.hubMonths || {}).flatMap(m => m.rows || []);
 async function hubSync(manual) {
   const c = hubCfg();
   if (!c) { if (manual === true) toast('Legg inn adresse og kode til Hub under Innstillinger først.'); return; }
@@ -1340,12 +1366,12 @@ async function hubSync(manual) {
     if (!TEMPLATES.length) { S.hubBusy = false; if (S.view !== 'ins') render(); return; }
     for (const i of Object.values(S.ins)) {
       if (i.status !== 'complete' || !TPL[i.templateId] || !i.date) continue;
-      const rec = hubRec(i), sig = JSON.stringify(rec);
+      const rec = hubRecSync(i), sig = JSON.stringify(rec);
       if (i.hubSig === sig) continue;
       await hubFetch('PUT', '/log/' + i.id, rec);
       i.hubSig = sig; await saveIns(i);
     }
-    const yms = recentMonths(6), cur = yms[0], now = Date.now();
+    const yms = recentMonths(13), cur = yms[0], now = Date.now();
     const need = yms.filter(y => y === cur || manual === true || !S.hubMonths[y] || now - S.hubMonths[y].at > 6 * 3600e3);
     const got = await Promise.all(need.map(async y => { try { return [y, await hubFetch('GET', '/month/' + y)]; } catch (e) { if (y === cur || e.status === 401) throw e; return null; } }));
     try { await loadLinks(); } catch (e) { if (e.status === 401) throw e; }
