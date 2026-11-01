@@ -68,6 +68,26 @@ const PDFDoc = (() => {
       for (const b of enc(s)) str += (b === 40 || b === 41 || b === 92) ? '\\' + String.fromCharCode(b) : String.fromCharCode(b);
       this.cur.push(`BT /${bold ? 'F2' : 'F1'} ${size} Tf ${rgb(color)} rg ${f(x*K)} ${f((this.H-y)*K)} Td (${str}) Tj ET`);
     }
+    rrectOps(x, y, w, h, r, fill, stroke, lw = 0.25) {
+      r = Math.min(r, w / 2, h / 2); const k = 0.5523 * r, X = v => f(v * K), Y = v => f((this.H - v) * K);
+      let p = `${X(x + r)} ${Y(y)} m ${X(x + w - r)} ${Y(y)} l ${X(x + w - r + k)} ${Y(y)} ${X(x + w)} ${Y(y + r - k)} ${X(x + w)} ${Y(y + r)} c `
+        + `${X(x + w)} ${Y(y + h - r)} l ${X(x + w)} ${Y(y + h - r + k)} ${X(x + w - r + k)} ${Y(y + h)} ${X(x + w - r)} ${Y(y + h)} c `
+        + `${X(x + r)} ${Y(y + h)} l ${X(x + r - k)} ${Y(y + h)} ${X(x)} ${Y(y + h - r + k)} ${X(x)} ${Y(y + h - r)} c `
+        + `${X(x)} ${Y(y + r)} l ${X(x)} ${Y(y + r - k)} ${X(x + r - k)} ${Y(y)} ${X(x + r)} ${Y(y)} c h`;
+      let pre = '';
+      if (fill) pre += `${rgb(fill)} rg `;
+      if (stroke) pre += `${rgb(stroke)} RG ${f(lw * K)} w `;
+      return `${pre}${p} ${fill && stroke ? 'B' : fill ? 'f' : 'S'}`;
+    }
+    rrect(x, y, w, h, r, fill, stroke, lw) { this.cur.push(this.rrectOps(x, y, w, h, r, fill, stroke, lw)); }
+    circle(cx, cy, r, fill) {
+      const k = 0.5523 * r, X = v => f(v * K), Y = v => f((this.H - v) * K);
+      this.cur.push(`${rgb(fill)} rg ${X(cx + r)} ${Y(cy)} m ${X(cx + r)} ${Y(cy - k)} ${X(cx + k)} ${Y(cy - r)} ${X(cx)} ${Y(cy - r)} c ${X(cx - k)} ${Y(cy - r)} ${X(cx - r)} ${Y(cy - k)} ${X(cx - r)} ${Y(cy)} c ${X(cx - r)} ${Y(cy + k)} ${X(cx - k)} ${Y(cy + r)} ${X(cx)} ${Y(cy + r)} c ${X(cx + k)} ${Y(cy + r)} ${X(cx + r)} ${Y(cy + k)} ${X(cx + r)} ${Y(cy)} c f`);
+    }
+    path(pts, color, lw = 0.5) {
+      const X = v => f(v * K), Y = v => f((this.H - v) * K);
+      this.cur.push(`${rgb(color)} RG ${f(lw * K)} w 1 J 1 j ${pts.map((p, i) => X(p[0]) + ' ' + Y(p[1]) + (i ? ' l' : ' m')).join(' ')} S 0 J 0 j`);
+    }
     image(data, pw, ph, x, y, w, h) {
       let i = this.images.findIndex(im => im.data === data);
       if (i < 0) { this.images.push({ data, w: pw, h: ph }); i = this.images.length - 1; }
@@ -103,3 +123,5 @@ const PDFDoc = (() => {
   }
   return Doc;
 })();
+
+if (typeof module !== "undefined") module.exports = PDFDoc;
