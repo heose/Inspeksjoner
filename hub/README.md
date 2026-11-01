@@ -23,3 +23,27 @@ Hub sender Trello-kall for appen, så nye enheter ikke trenger nøkkel og token.
 3. I Argus: Innstillinger → Test tilkobling. Når Hub-kode er satt, brukes Hub automatisk og feltene for nøkkel og token skjules.
 
 Hub tillater bare kallene appen trenger mot tavlen Vaktmester. Bytter du token i Trello, oppdaterer du `TRELLO_TOKEN` her.
+
+## Hub v2: koder per bruker, innhold i Hub
+
+**Koder per bruker (valgfritt, anbefalt)**
+1. Settings → Variables and Secrets → legg til secret `CODES` med JSON, én kode per person:
+   `{"henrik":"kode-til-henrik","kari":"kode-til-kari"}`. Bruk lange koder av små bokstaver og tall.
+2. Legg til secret `ADMINS` med navnene som får laste opp innhold, f.eks. `henrik`.
+3. Den gamle `CODE` virker fortsatt som felles administratorkode. Slett den når alle har fått sin egen.
+4. Vil du stenge ute én person, fjerner du vedkommende fra `CODES`.
+
+**Sikkerhet**
+- Etter 10 gale koder fra samme adresse blir den sperret i 15 minutter.
+- Loggen får navnet fra koden (`user`), ikke bare det som står i appen.
+
+**Innhold (sjekklister, bygg, anlegg)**
+- Ligger ikke lenger i appen på GitHub, men i Hub. Appen henter det etter at koden er lagt inn, og lagrer det på enheten så alt virker uten nett.
+- Selve filen holdes utenfor repoet. Last opp ny versjon i Argus: Innstillinger → Last opp innholdsfil (bare administrator).
+- Appen sjekker for nytt innhold ved hver synk og bytter det ut når du ikke er midt i en inspeksjon.
+
+**Rekkefølge ved innføring**
+1. Lim inn ny `worker.js` i Cloudflare og Deploy.
+2. Publiser ny app (main).
+3. Åpne appen på PC, legg inn adresse og administratorkode, trykk «last opp innholdsfil» og velg `content.js`.
+4. Telefonene henter innholdet selv neste gang de åpnes med nett.

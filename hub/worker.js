@@ -1,9 +1,23 @@
 // Argus Hub – Cloudflare Worker (gratisnivå)
 // Oppsett: se hub/README.md
-// Bindinger: KV-namespace "ARGUS" og hemmelighet (secret) "CODE".
+// Bindinger: KV-namespace "ARGUS".
+// Secrets: CODE (felles kode, administrator), eller CODES (JSON: {"henrik":"kode1","kari":"kode2"}) og ADMINS (navn, kommaseparert).
 
 const ORIGINS = ['https://heose.github.io', 'http://localhost:8000', 'http://127.0.0.1:8000'];
-const MAX_PDF = 20 * 1024 * 1024;
+const MAX_PDF = 20 * 1024 * 1024, MAX_CONTENT = 1024 * 1024;
+const MAX_FAILS = 10, FAIL_WINDOW = 900; // 10 feil kode-forsøk per IP per 15 min
+
+// Sammenligner uten å røpe hvor langt forsøket kom
+const same = (a, b) => { a = String(a); b = String(b); let d = a.length ^ b.length; for (let i = 0; i < Math.max(a.length, b.length); i++) d |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0); return d === 0; };
+function who(req, env) {
+  const c = req.headers.get('x-argus-code'); if (!c) return null;
+  let users = {}; try { users = JSON.parse(env.CODES || '{}'); } catch (e) {}
+  const admins = String(env.ADMINS || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+  let hit = null;
+  for (const [name, code] of Object.entries(users)) if (code && same(code, c)) hit = { name, admin: admins.includes(name.toLowerCase()) };
+  if (!hit && env.CODE && same(env.CODE, c)) hit = { name: 'felles', admin: true };
+  return hit;
+}
 
 // Trello-proxy: nøkkel og token (secrets TRELLO_KEY og TRELLO_TOKEN) legges på her.
 // Bare disse kallene mot tavlen Vaktmester er tillatt.
@@ -37,7 +51,11 @@ export default {
     const url = new URL(req.url);
     const p = url.pathname.split('/').filter(Boolean);
 
-    if (!env.CODE || req.headers.get('x-argus-code') !== env.CODE) return json(req, { error: 'Feil kode' }, 401);
+    const ip = req.headers.get('CF-Connecting-IP') || 'ukjent', failKey = 'fail:' + ip;
+    const fails = parseInt(await env.ARGUS.get(failKey) || '0', 10);
+    if (fails >= MAX_FAILS) return json(req, { error: 'For mange forsøk. Vent 15 minutter.' }, 429);
+    const user = who(req, env);
+    if (!user) { await env.ARGUS.put(failKey, String(fails + 1), { expirationTtl: FAIL_WINDOW }); return json(req, { error: 'Feil kode' }, 401); }
 
     try {
       // GET /ping
@@ -62,12 +80,28 @@ export default {
         return new Response(r.body, { status: r.status, headers: { ...cors(req), 'content-type': r.headers.get('content-type') || 'application/json' } });
       }
 
+      // GET /content  –  PUT /content (bare administrator): sjekklister, bygg og anleggsregister som skript
+      if (p[0] === 'content' && !p[1]) {
+        if (req.method === 'GET') {
+          const { value, metadata } = await env.ARGUS.getWithMetadata('content');
+          if (!value) return json(req, { error: 'Ingen innhold' }, 404);
+          return json(req, { src: value, at: (metadata && metadata.at) || 0 });
+        }
+        if (req.method === 'PUT') {
+          if (!user.admin) return json(req, { error: 'Bare administrator kan laste opp innhold' }, 403);
+          const src = await req.text();
+          if (!src || src.length > MAX_CONTENT) return json(req, { error: 'Ugyldig størrelse' }, 400);
+          await env.ARGUS.put('content', src, { metadata: { at: Date.now(), by: user.name } });
+          return json(req, { ok: true, bytes: src.length });
+        }
+      }
+
       // PUT /log/:id   (JSON: { id, date, ... })
       if (req.method === 'PUT' && p[0] === 'log' && p[1]) {
         const rec = await req.json();
         const ym = String(rec.date || '').slice(0, 7);
         if (!/^\d{4}-\d{2}$/.test(ym)) return json(req, { error: 'Ugyldig dato' }, 400);
-        rec.id = p[1]; rec.hubAt = Date.now();
+        rec.id = p[1]; rec.hubAt = Date.now(); rec.user = user.name;
         await env.ARGUS.put(`log:${ym}:${p[1]}`, JSON.stringify(rec));
         return json(req, { ok: true });
       }

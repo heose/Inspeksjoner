@@ -1,357 +1,17 @@
 'use strict';
 /* Argus – offline inspeksjonsapp. Data lagres i IndexedDB på enheten. */
 
-/* ---------- Sjekklister ---------- */
-const yn  = (id, label, o = {}) => ({ id, type: 'yn', label, ...o });
-const ok  = (id, label, o = {}) => ({ id, type: 'ok', label, ...o });
-const okm = (id, label, o = {}) => ({ id, type: 'okm', label, ...o });
-const num = (id, label, unit, o = {}) => ({ id, type: 'number', label, unit, ...o });
-const txt = (id, label, o = {}) => ({ id, type: 'text', label, ...o });
-const dat = (id, label, o = {}) => ({ id, type: 'date', label, ...o });
-const cho = (id, label, options, o = {}) => ({ id, type: 'choice', label, options, ...o });
-const mul = (id, label, options, o = {}) => ({ id, type: 'multi', label, options, ...o });
-const hd  = (id, label) => ({ id, type: 'heading', label });
-const inf = (id, label) => ({ id, type: 'info', label });
-const k12 = id => yn(id, 'Er det mindre enn 12 mnd siden siste sakkyndige kontroll?', { help: 'Hvis Nei: opprett handling og bestill service.' });
-
-const vkBase = press => [
-  ok('hovedventil', 'Hovedventil låst?'),
-  ok('turbin', 'Turbinklokke ok?'),
-  num('trykk_over', 'Trykk over', 'bar', { help: 'Ta gjerne bilde av loggboka.' }),
-  num('trykk_under', 'Trykk under', 'bar'),
-  ...(press ? [ok('press1', 'Alarmoverføring pressostat 1'), ok('press2', 'Alarmoverføring pressostat 2')] : []),
-];
-const ALARMINFO = 'Sør-Øst 110 varsles på 3304110 før test. Brannsentralen skal være i normal drift og uten feilmeldinger. Utkoblinger skal være loggført og med beskrivelse av årsak.';
-const nokkelBlock = () => [hd('h_nokkel', 'Nøkkelboks'), yn('nokler', 'Har du husket å vri nøkler til normalposisjon?')];
-const alarmBlock = () => [hd('h_alarm', 'Alarmtavle'), inf('alarminfo', ALARMINFO), ok('sentral', 'Brannsentral ok'), ok('overforing', 'Alarmoverføring')];
-const vkTail = () => [...nokkelBlock(), ...alarmBlock()];
-
-const uke = o => [
-  ...o.vent,
-  ok('innelys', 'Innelys er i orden'),
-  ok('utelys', 'Utelys er i orden'),
-  ...(o.glykol ? [ok('glykol', 'Det er trykk i glykolkurs/trykkvann til varme', { help: 'Etterfyll om nødvendig.' })] : []),
-  ok('sikringer', 'Alle sikringer ligger inne', { help: 'Sikringer som er frakoblet skal være tapet / merket. Tavlerom skal være ryddig.' }),
-  ok('branntavle', 'Branntavle er fri for feil og utkoblinger', { help: 'Hvis utkoblinger: velg utkobling og noter nummer.' }),
-  ok('nodlys', 'Nød- og ledelys er i orden', { help: 'Ved feil, opprett handling; noter nummer på lampe, og ta bilde.' }),
-  ok('sprinklerrom', 'Sprinklerrom er ok, ingen synlige lekkasjer', { help: 'Sjekk at det er trykk på manometer.' }),
-  ...(o.menerga ? [ok('menerga', 'Sjekk vann i Menerga anlegg', { help: 'Det skal være åpent og kunne renne ut av rør mot sluk. Sjekk evt. luke i vent.anlegg.' })] : []),
-  ok('varemottak', 'Varemottak er ryddig og lite bøss'),
-  ok('uteomrade', 'Uteområdet er ryddig'),
-  ok('skader', 'Bygget er fri for skader', { help: 'Ta bilde av bygningsskade om du er i tvil om noe er nytt eller gammelt, og opprett handling.' }),
-  ok('kamera', 'Kameraovervåkning er i orden på alle kameraene', { help: 'Dersom noen mangler, restart maskin.' }),
-  txt('andre', 'Andre observasjoner som ikke passer inn i kategoriene over', { suggestOn: 'any', help: 'Ta bilde og opprett handling.' }),
-  yn('skjema', 'Er det noe annet som bør legges til i dette skjemaet?', { flag: [], neutral: true }),
-];
-const kum = () => [
-  ok('tilstand', 'Generell tilstand i kum'),
-  ok('pumper', 'Funksjonstest pumper', { help: 'Kjør pumper manuelt i minst 30 sek.' }),
-  yn('arskontroll', 'Har det vært årskontroll siden forrige månedlige test?', { flag: [], neutral: true }),
-  yn('auto', 'Er pumper satt tilbake i AUTO?'),
-];
-const svc = (p, o = {}) => [
-  ok(p + '_ok', o.q || 'Kontroller at service intervaller følges og utstyret fungerer?', o.help ? { help: o.help } : {}),
-  txt(p + '_lev', o.lev || 'Navn på service leverandør', { carry: true }),
-  dat(p + '_dato', o.dato || 'Dato for siste eksterne kontroll', { carry: true, yearly: true }),
-];
-
-const TEMPLATES = [
-  {
-    id: 'internkontroll', name: 'Periodisk internkontroll', site: 'Olsrød Park – Teknisk', months: 1,
-    sections: [
-      { id: 'endringer', title: 'Strukturelle og funksjonelle endringer i bygget', items: [
-        yn('ombygg', 'Er det foretatt ombygninger av lokaler eller bygget siden forrige inspeksjon?', { flag: ['Ja'] }),
-        txt('lokale', 'I hvilket lokale er ombygning utført?', { showIf: { item: 'ombygg', eq: 'Ja' } }),
-        cho('arbeid', 'Hva slags arbeider er gjort?', ['Flytting av vegger', 'Nye gjennomføringer', 'Endring av dører', 'Annet'], { showIf: { item: 'ombygg', eq: 'Ja' } }),
-        yn('egenregi', 'Skal det gjøres ferdigstillende arbeider i egen regi?', { flag: [], suggestOn: ['Ja'], help: 'Hvis Ja: opprett handling.', showIf: { item: 'ombygg', eq: 'Ja' } }),
-        yn('brannceller', 'Kan endringene ha påvirket branncellebegrensende konstruksjoner?', { flag: ['Ja'], showIf: { item: 'ombygg', eq: 'Ja' } }),
-        txt('entreprenor', 'Utførende entreprenør', { suggestOn: 'any', help: 'Entreprenøren bes sende dokumentasjon på at brannsikkerhetskrav er ivaretatt. Opprett handling med dato for oppfølging.', showIf: { item: 'brannceller', eq: 'Ja' } }),
-        dat('befaring', 'Dato for befaring med entreprenør når arbeidene er ferdigstilt', { showIf: { item: 'ombygg', eq: 'Ja' } }),
-      ] },
-      { id: 'brann', title: 'Brann', items: [yn('tavle', 'Branntavle OK?'), k12('k12')] },
-      { id: 'sprinkler', title: 'Sprinkleranlegg', items: [
-        yn('finnes', 'Er det sprinkleranlegg i bygget?', { flag: [] }),
-        yn('merket', 'Adgang til sprinkleranlegg er merket på dør', { showIf: { item: 'finnes', ne: 'Nei' } }),
-        yn('ryddig', 'Sprinklerrom er ryddig og i orden', { showIf: { item: 'finnes', ne: 'Nei' } }),
-        yn('ventiler', 'Stengeventiler er sikret/låst og merket', { showIf: { item: 'finnes', ne: 'Nei' } }),
-        yn('loggbok', 'Loggbok er oppdatert og uten merknader', { showIf: { item: 'finnes', ne: 'Nei' } }),
-        { ...k12('k12'), showIf: { item: 'finnes', ne: 'Nei' } },
-      ] },
-      { id: 'romning', title: 'Rømningsveier', items: [yn('ok', 'Er rømningsveier kontrollert og funnet i orden?')] },
-      { id: 'ledelys', title: 'Markeringslys / ledelys', items: [
-        yn('ok', 'Er markeringslys/ledelys OK?'),
-        yn('avvik', 'Er det laget avvik?', { showIf: { item: 'ok', eq: 'Nei' } }),
-      ] },
-      { id: 'slokke', title: 'Håndslokkeapparater', items: [yn('ok', 'Er slokkeapparat sjekket og funnet i orden?'), k12('k12')] },
-      { id: 'slanger', title: 'Brannslanger', items: [yn('ok', 'Er brannslangene sjekket og funnet i orden?'), k12('k12')] },
-      { id: 'royk', title: 'Røykventilasjon / branngardiner', items: [yn('ok', 'Er røykventilasjon/branngardiner sjekket og funnet i orden?'), k12('k12')] },
-      { id: 'dorer', title: 'Branndører og porter', items: [yn('ok', 'Er branndører og porter sjekket og funnet i orden?'), k12('k12')] },
-    ],
-  },
-  {
-    id: 'sprinkel_vk', name: 'Brann og sprinkeltest VK/SVK', site: 'Vekterkvartalet – Teknisk', months: 1,
-    sections: [
-      { id: 'forberedelse', title: 'Før testen', items: [
-        inf('lokal', 'Husk å vri om nøkkel på gul boks ved lokal test. Ved lokal test skal GUL lampe på testboks lyse og GRØNN lampe indikerer vellykket test. Turbinklokke skal være uten lekkasje. Hovedventil skal være låst, men mulighet for å åpnes uten nøkkel (strips, lenke etc.).'),
-        inf('utkobling', 'Start med å koble ut følgende i 1 time: Summer på panel, Sprinklervakt næring 01.123, Sprinklervakt leiligheter 01.124.'),
-      ] },
-      { id: 'sted', title: 'Hvilket sted', items: [mul('hvor', 'Hvor testes det?', ['Næring', 'Leiligheter trinn 1-3', 'Leiligheter trinn 4'])] },
-      { id: 'naering', title: 'Næring', showIf: { item: 'sted.hvor', includes: 'Næring' }, items: [...vkBase(true), ...vkTail()] },
-      { id: 'leil13', tl: 'svk', title: 'SVK bolig trinn 1-3', showIf: { item: 'sted.hvor', includes: 'Leiligheter trinn 1-3' }, items: [...vkBase(false), ...vkTail()] },
-      { id: 'leil4', tl: 'svk', title: 'SVK bolig trinn 4', showIf: { item: 'sted.hvor', includes: 'Leiligheter trinn 4' }, items: [
-        ...vkBase(false),
-        hd('h_varme', 'Varmekabel sprinkler'),
-        yn('sept_april', 'Er måneden i perioden sept–april?', { flag: [], neutral: true, auto: 'septApril' }),
-        yn('varmekabel', 'Er test ok på både VK1 og VK2?', { showIf: { item: 'sept_april', eq: 'Ja' } }),
-        ...vkTail(),
-      ] },
-      { id: 'innkobling', title: 'Innkobling', items: [yn('summer', 'Koble inn summer på panel', { help: 'Bekreft at summer er koblet inn igjen.' })] },
-    ],
-  },
-  {
-    id: 'kloakk', name: 'Kloakktest', site: 'Olsrød Park – Teknisk', months: 1,
-    sections: [
-      { id: 'sted', title: 'Hvilket sted', items: [mul('hvor', 'Hvor testes det? Velg ett eller begge.', ['Gammel del', 'Level'])] },
-      { id: 'gml', title: 'Kloakkum gammel del', showIf: { item: 'sted.hvor', includes: 'Gammel del' }, items: kum() },
-      { id: 'level', title: 'Kloakkum Level', showIf: { item: 'sted.hvor', includes: 'Level' }, items: kum() },
-      { id: 'kum', title: 'Kloakkum', repeat: true, unit: 'Kum', defaultCount: 2, showIf: { legacy: 'kum' }, items: [cho('sted', 'Hvor testes det?', ['Gammel del', 'Level'], { allowOther: true }), ...kum()] },
-    ],
-  },
-  {
-    id: 'vernerunde', name: 'Vernerunde kvartalsvis', site: 'Sameiet VK, Vekterkvartalet – Teknisk', months: 3,
-    sections: [
-      { id: 'nodlys', title: 'Nødlys', items: [okm('ok', 'Nødlys kontrollert og funnet i orden?', { help: 'Utføres egen kontroll av nødlys: velg Merknad og skriv i notat.' })] },
-      { id: 'elektro', title: 'Elektro – sikringsskap og tavler', items: [ok('tavler', 'Visuell kontroll av sikringsskapene og sjekk rundt i tavlerom')] },
-      { id: 'slukke', title: 'Slukkeutstyr', items: [
-        yn('handslokkere', 'Håndslokkere kontrollert og funnet i orden?'),
-        yn('slanger', 'Brannslanger kontrollert og funnet i orden?'),
-        yn('frost', 'Dersom i kuldeperiode: sjekk også frostvakter i brannskap. Sjekket ok?'),
-      ] },
-      { id: 'romning', title: 'Rømningsveier', items: [yn('frie', 'Er rømningsveier frie og uten lagring?')] },
-      { id: 'hjerte', title: 'Hjertestarter', items: [
-        ok('ok', 'Kontroller at hjertestarter er i orden'),
-        dat('batteri', 'Utløpsdato batteri', { expiry: true }),
-        dat('pads', 'Datostempling pads/elektroder', { expiry: true }),
-      ] },
-      { id: 'andre', title: 'Andre observasjoner', items: [
-        hd('h_orden', 'Orden og renhold'),
-        ok('rent', 'Er det rent og ryddig?'),
-        ok('kilde', 'Fungerer kildesorteringen?'),
-        ok('utvendig', 'Sjekk bygg for skader utvendig'),
-        yn('andre', 'Andre observasjoner som ikke passer inn i kategoriene over?', { flag: ['Ja'], help: 'Ta bilde og opprett handling.' }),
-        yn('skjema', 'Er det noe annet som bør legges til i dette skjemaet?', { flag: [], neutral: true }),
-      ] },
-    ],
-  },
-  {
-    id: 'sprinkel_op', name: 'Brann og sprinkeltest OP', site: 'Olsrød Park – Teknisk', months: 1,
-    sections: [
-      { id: 'sprinkler', title: 'Sprinkleranlegg', items: [ok('summer', 'Er summer koblet ut før test?')] },
-      { id: 'sted', title: 'Hvilket sted', items: [mul('hvor', 'Hvor testes det?', ['Næring ny del', 'Leiligheter ny del', 'Næring gammel del'])] },
-      { id: 'naering_ny', title: 'Næring ny del', showIf: { item: 'sted.hvor', includes: 'Næring ny del' }, items: [...vkBase(true), ...nokkelBlock(), ...alarmBlock()] },
-      { id: 'leil_ny', title: 'Bolig', showIf: { item: 'sted.hvor', includes: 'Leiligheter ny del' }, items: [...vkBase(false), ...nokkelBlock(), ...alarmBlock()] },
-      { id: 'naering_gml', title: 'Næring gammel del', showIf: { item: 'sted.hvor', includes: 'Næring gammel del' }, items: [...vkBase(true)] },
-    ],
-  },
-  {
-    id: 'sprinkel_tb', name: 'Sprinkeltest Tollbodgata 14', site: 'Tollbodgata 14', months: 1,
-    sections: [
-      { id: 'sprinkler', title: 'Sprinkleranlegg', items: [
-        inf('info', 'Husk å vri om nøkler på grå boks ved lokal test. Ved lokal test skal GUL lampe på testboks lyse og RØD lampe indikerer vellykket test. Turbinklokke skal være uten lekkasje. Hovedventil skal være låst, men mulighet for å åpnes uten nøkkel (strips, lenke etc.).'),
-      ] },
-      { id: 'vatventil', title: 'Våtventil', items: [
-        ok('hovedventil', 'Hovedventil låst?'), ok('turbin', 'Turbinklokke ok?'),
-        num('over', 'Overtrykk', 'bar'), num('under', 'Undertrykk', 'bar'),
-        ok('press1', 'Alarmoverføring pressostat 1'), ok('press2', 'Alarmoverføring pressostat 2'),
-      ] },
-      { id: 'torrventil', title: 'Tørr ventil', items: [
-        ok('hovedventil', 'Hovedventil låst?'), ok('turbin', 'Turbinklokke ok?'),
-        num('over', 'Overtrykk', 'bar'), num('under_vann', 'Undertrykk vann', 'bar'),
-        num('under_luft', 'Undertrykk luft', 'bar'), num('trykk_luft', 'Trykk luft', 'bar'),
-        ok('overforing', 'Alarmoverføring tørrventil'),
-      ] },
-      { id: 'kompressor', title: 'Kompressor', items: [
-        ok('drift', 'Drift kompressor'), num('trykk', 'Kompressor trykk', 'bar'), ok('drenering', 'Drenering vann kompressor'),
-      ] },
-      { id: 'alarmtavle', title: 'Alarmtavle', items: [inf('info', ALARMINFO)] },
-      { id: 'brannsentral', title: 'Brannsentral', items: [
-        ok('sentral', 'Brannsentral Røde Kors'), ok('branntavle', 'Branntavle leiligheter. Visuell kontroll'), ok('overforing', 'Alarmoverføring til Sør-Øst 110'),
-      ] },
-      { id: 'nokkelboks', title: 'Nøkkelboks', items: [yn('nokler', 'Har du husket å vri nøkler til normalposisjon?')] },
-      { id: 'nodlys', title: 'Nødlys', items: [yn('ok', 'Er nødlys sjekket og funnet i orden?')] },
-    ],
-  },
-  {
-    id: 'op_ukentlig', name: 'Ukentlig sjekkrunde OP', site: 'Olsrød Park – Teknisk', days: 7,
-    sections: [{ id: 'runde', title: 'Inspeksjon', items: [
-      inf('intro', 'Under hvert punkt kan det opprettes handlinger eller legges til bilder ved observasjoner.'),
-      ...uke({ vent: [ok('vent', 'Ventilasjon er i orden, ingen feilmeldinger eller uventet stans')], glykol: true, menerga: true }),
-    ] }],
-  },
-  {
-    id: 'vk_ukentlig', name: 'Ukentlig sjekkrunde VK', site: 'Vekterkvartalet – Teknisk', days: 7,
-    sections: [{ id: 'runde', title: 'Inspeksjon', items: [
-      inf('intro', 'Under hvert punkt kan det opprettes handlinger eller legges til bilder ved observasjoner.'),
-      ...uke({ vent: [
-        hd('h_vent', 'Ventilasjon'),
-        inf('ventinfo', 'Sjekk at ventilasjon er i orden, ingen feilmeldinger eller uventet stans.'),
-        ok('vent1', 'Ventilasjon senter og legesenter 36.08 og 36.09'),
-        ok('vent2', 'Ventilasjon tak 36.10, 36.11, 36.12, 36.13'),
-        ok('vent3', 'Ventilasjon kjeller (Yaku) 36.06'),
-      ] }),
-    ] }],
-  },
-  {
-    id: 'vernerunde_halvar', name: 'Vernerunde halvårlig', site: 'Vekterkvartalet – Teknisk', months: 6,
-    sections: [
-      { id: 'elektro', title: 'Elektro', items: [
-        hd('h_vent', 'Ventilasjon'),
-        ...svc('vent', { q: 'Ventilasjon: Kontroller at service intervaller følges og utstyret fungerer?' }),
-        hd('h_tavler', 'Sikringsskap og tavler'),
-        ...svc('tavler', { q: 'Visuell kontroll av sikringsskapene og sjekk rundt i tavlerom.', lev: 'Navn på service/kontroll leverandør' }),
-      ] },
-      { id: 'teknisk', title: 'Teknisk', items: [
-        hd('h_rulle', 'Rulletrapp'),
-        ...svc('rulle', { dato: 'Dato for siste kontroll' }),
-        hd('h_heis', 'Heis'),
-        ...svc('heis'),
-      ] },
-      { id: 'brannvern', title: 'Brannvern', items: [
-        hd('h_nodlys', 'Nødlys'),
-        ok('nodlys_ok1', 'Kontroller at service intervaller følges og utstyret fungerer.', { help: 'Det er ikke intensjonen i denne inspeksjonen å sjekke alle nødlys, men heller kontrollere at de rutinemessige kontrollene fungerer.' }),
-        ...svc('nodlys', { q: 'Kontroller at service intervaller følges.', dato: 'Dato for siste kontroll' }),
-        txt('nodlys_egen', 'Siste egenkontroll utført av', { carry: true }),
-        dat('nodlys_egendato', 'Dato for egenkontroll', { carry: true }),
-        hd('h_slokk', 'Håndslukkere og brannslanger'),
-        inf('slokk_info1', 'Brannslukkere: Kontroller at plomberingen er intakt, trykkmåleren er i det grønne området, og at apparatet er lett tilgjengelig. Gummislange skal være uten sprekker.'),
-        inf('slokk_info2', 'Brannslanger: Sjekk at munnstykket fungerer og beveg kuleventil for åpning et par ganger for å sjekke funksjon. Sjekk at det ikke lekker i skap ved åpen ventil.'),
-        ...svc('slokk'),
-        inf('slokk_frost', 'Dersom i kuldeperiode: sjekk også frostvakter i brannskap.'),
-        hd('h_ovelse', 'Brannøvelser'),
-        dat('ovelse_dato', 'Dato for siste gjennomføring', { carry: true }),
-        hd('h_spr', 'Sprinkleranlegg'),
-        ok('spr_ok1', 'Kontroller at service intervaller følges og utstyret fungerer?', { help: 'Hvis loggbok på papir, ta bilde og legg ved.' }),
-        txt('spr_lev', 'Navn på service leverandør', { carry: true }),
-        dat('spr_dato', 'Dato for siste kontroll', { carry: true, yearly: true }),
-        ok('spr_ok2', 'Kontroller at service intervaller følges og utstyret fungerer?', { help: 'Hvis loggbok på papir, ta bilde og legg ved.' }),
-        txt('spr_kontrollor', 'Navn på uavhengig kontrollør', { carry: true }),
-        dat('spr_dato2', 'Dato for siste kontroll', { carry: true, yearly: true }),
-        dat('spr_egen', 'Dato for siste egenkontroll', { carry: true }),
-        yn('spr_logg', 'Bilde av loggbok lagt ved?', { flag: [], neutral: true, help: 'Bruk Bilde-knappen.' }),
-        hd('h_dorer', 'Branndører / Rømningsveier'),
-        inf('dorer_info', 'Lukk døren ved å trykke på magnetutløser på branndør og sjekk at alle dørbladene lukker tilfredsstillende. Betjen panikkbeslag for åpning. Rømningsveier skal være frie for lagring, også utenfor normalt lukket branndør.'),
-        ok('dorer_ok', 'Kontroller at rømningsveier er frie og at utstyret fungerer?'),
-        hd('h_merk', 'Brannmerking'),
-        inf('merk_info', 'Kontroller at brannskilt er hele og synlige. Kontroller at orienteringsplaner og branninstrukser er montert på strategiske steder.'),
-        ok('merk_ok', 'Kontroller at brannskilt er hele og synlige.'),
-        hd('h_hjerte', 'Hjertestarter'),
-        inf('hjerte_info', 'Kontroller at hjertestarter er i orden og at boks for tilbehør er tilstede. Boks skal inneholde klut, saks, barberhøvel, pocketmask.'),
-        ok('hjerte_ok', 'Kontroller at hjertestarter er i orden'),
-        dat('batteri', 'Utløpsdato batteri', { expiry: true, carry: true }),
-        dat('pads', 'Datostempling pads/elektroder', { expiry: true, carry: true }),
-      ] },
-      { id: 'diverse', title: 'Diverse', items: [
-        hd('h_vvs', 'VVS-anlegg'),
-        inf('vvs_info', 'Sjekk taksluk og se etter andre skader og mangler på rom som har VVS-tilknytning.'),
-        ok('vvs_ok', 'Kontrollert og ok'),
-        hd('h_orden', 'Orden og renhold'),
-        inf('orden_info', 'Sjekk at kildesortering fungerer og at det er tilstrekkelig med beholdere slik at det ikke blir plassert søppel på utsiden.'),
-        ok('rent', 'Er det rent og ryddig?'),
-        ok('kilde', 'Fungerer kildesorteringen?'),
-        ok('utvendig', 'Sjekk bygg for skader utvendig'),
-        hd('h_annet', 'Annet'),
-        txt('merknader', 'Andre merknader eller funn', { suggestOn: 'any' }),
-      ] },
-    ],
-  },
-];
-TEMPLATES.push({
-  id: 'avvik', name: 'Avviksmelding', site: '', hidden: true,
-  sections: [{ id: 'avvik', title: 'Avvik', items: [{ id: 'feil', type: 'avvik', label: 'Beskriv avviket', help: 'Ta bilde og skriv i handlingen hva som må gjøres. Handlingen blir et kort i Trello når du fullfører.' }] }],
-});
-TEMPLATES.push({
-  id: 'halvar_op', name: 'Halvårlig servicesjekk OP', site: 'Olsrød Park – Teknisk', months: 6,
-  sections: [
-    { id: 'heis1', title: 'Heis 1', items: svc('s', { help: 'Sjekk serviceboka/loggen i maskinrom eller heisstol.' }) },
-    { id: 'heis2', title: 'Heis 2', items: svc('s', { help: 'Sjekk serviceboka/loggen i maskinrom eller heisstol.' }) },
-    { id: 'rulle', title: 'Rulletrapp', items: svc('s', { dato: 'Dato for siste kontroll' }) },
-  ],
-});
-const ORDER = ['internkontroll', 'sprinkel_op', 'kloakk', 'op_ukentlig', 'halvar_op', 'sprinkel_vk', 'vk_ukentlig', 'vernerunde', 'vernerunde_halvar', 'sprinkel_tb'];
-TEMPLATES.sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
-const TRELLO = { done: '69fd938488c9a6df080a9712', board: '69fd92b5f73c4c4645f0a9b2', lists: { olsrod: '69fd92efa0fbbbd4a10fc0ee', vk: '69fd92f5a4757aaa7dcfef02', svk: '6ae5a990f8db6f1ba0c7970f', tb: '6ae5a995305871414c09e581' } };
-const TLIST = { internkontroll: 'olsrod', sprinkel_op: 'olsrod', kloakk: 'olsrod', op_ukentlig: 'olsrod', halvar_op: 'olsrod', sprinkel_vk: 'vk', vk_ukentlig: 'vk', vernerunde_halvar: 'vk', vernerunde: 'svk', sprinkel_tb: 'tb' };
-TEMPLATES.forEach(t => { t.tl = TLIST[t.id]; });
+/* ---------- Innhold (sjekklister, bygg, anlegg) ----------
+   Ligger ikke i appen. Lastes fra Hub etter at Hub-koden er lagt inn, og lagres lokalt så alt virker uten nett. */
+let TEMPLATES = [], TPL = {}, SITES = [], ANLEGG = [], ANL = {}, TRELLO = { done: '', board: '', lists: {} };
 const listKey = (ins, key) => { const t = TPL[ins.templateId]; return ins.tl || findItem(t, key).sec?.tl || t.tl; };
-const TPL = Object.fromEntries(TEMPLATES.map(t => [t.id, t]));
-/* ---------- Anleggsregister ----------
-   Hvert anlegg peker på punktene i sjekklistene som kontrollerer det: [mal, [nøkler]].
-   En nøkkel er 'seksjon' (hele seksjonen) eller 'seksjon.punkt'. Tillegg: x = punkter som ikke teller,
-   w = bare instanser der et svar er lik en verdi (kloakkum). */
-const SITES = [
-  { id: 'op', tl: 'olsrod', name: 'Olsrød Park', short: 'OP', tpls: ['op_ukentlig', 'internkontroll', 'sprinkel_op', 'kloakk', 'halvar_op'] },
-  { id: 'vk', tl: 'vk', name: 'Vekterkvartalet', short: 'VK', tpls: ['vk_ukentlig', 'sprinkel_vk', 'vernerunde_halvar'] },
-  { id: 'svk', tl: 'svk', name: 'Sameiet VK', short: 'SVK', tpls: ['sprinkel_vk', 'vernerunde'] },
-  { id: 'tb', tl: 'tb', name: 'Tollbodgata 14', short: 'TB', tpls: ['sprinkel_tb'] },
-];
-const ALARM = ['h_nokkel', 'nokler', 'h_alarm', 'alarminfo', 'sentral', 'overforing'];
-const sv = (sec, p) => ['_ok', '_lev', '_dato'].map(x => sec + '.' + p + x);
-const R = (...ids) => ids.map(i => 'runde.' + i);
-const ANLEGG = [
-  ['op', 'op_brann', 'Brannalarmanlegg', 'Brannsentral, alarmoverføring og nøkkelboks', [['op_ukentlig', R('branntavle')], ['internkontroll', ['brann']], ['sprinkel_op', ['naering_ny', 'leil_ny'].flatMap(s => ALARM.map(i => s + '.' + i))]]],
-  ['op', 'op_spr_ny', 'Sprinkleranlegg – næring ny del', '', [['sprinkel_op', ['sprinkler', 'naering_ny'], { x: ALARM }], ['op_ukentlig', R('sprinklerrom')], ['internkontroll', ['sprinkler']]]],
-  ['op', 'op_spr_bolig', 'Sprinkleranlegg – bolig', '', [['sprinkel_op', ['leil_ny'], { x: ALARM }]]],
-  ['op', 'op_spr_gml', 'Sprinkleranlegg – næring gammel del', '', [['sprinkel_op', ['naering_gml']]]],
-  ['op', 'op_nodlys', 'Nød- og ledelys', 'Årskontroll: Xpert installasjon', [['op_ukentlig', R('nodlys')], ['internkontroll', ['ledelys']]]],
-  ['op', 'op_romning', 'Rømningsveier', '', [['internkontroll', ['romning']]]],
-  ['op', 'op_slokke', 'Håndslokkeapparater', '', [['internkontroll', ['slokke']]]],
-  ['op', 'op_slanger', 'Brannslanger', '', [['internkontroll', ['slanger']]]],
-  ['op', 'op_royk', 'Røykventilasjon og branngardiner', '', [['internkontroll', ['royk']]]],
-  ['op', 'op_dorer', 'Branndører og porter', '', [['internkontroll', ['dorer']]]],
-  ['op', 'op_kloakk_gml', 'Kloakkum og pumper – gammel del', '', [['kloakk', ['gml']], ['kloakk', ['kum'], { w: ['sted', 'Gammel del'] }]]],
-  ['op', 'op_kloakk_level', 'Kloakkum og pumper – Level', '', [['kloakk', ['level']], ['kloakk', ['kum'], { w: ['sted', 'Level'] }]]],
-  ['op', 'op_vent', 'Ventilasjon', '', [['op_ukentlig', R('vent')]]],
-  ['op', 'op_varme', 'Varmeanlegg', 'Glykolkurs og trykkvann', [['op_ukentlig', R('glykol')]]],
-  ['op', 'op_menerga', 'Menerga-anlegg', '', [['op_ukentlig', R('menerga')]]],
-  ['op', 'op_el', 'El-tavler og sikringer', '', [['op_ukentlig', R('sikringer')]]],
-  ['op', 'op_lys', 'Belysning inne og ute', '', [['op_ukentlig', R('innelys', 'utelys')]]],
-  ['op', 'op_kamera', 'Kameraovervåking', '', [['op_ukentlig', R('kamera')]]],
-  ['op', 'op_heis1', 'Heis 1', '', [['halvar_op', ['heis1']]]],
-  ['op', 'op_heis2', 'Heis 2', '', [['halvar_op', ['heis2']]]],
-  ['op', 'op_rulle', 'Rulletrapp', '', [['halvar_op', ['rulle']]]],
-  ['op', 'op_bygg', 'Bygg, uteområde og varemottak', '', [['op_ukentlig', R('varemottak', 'uteomrade', 'skader', 'andre')], ['internkontroll', ['endringer']]]],
+function applyContent(src) {
+  const c = new Function(src)();
+  if (!c || !Array.isArray(c.TEMPLATES) || !Array.isArray(c.SITES) || !Array.isArray(c.ANLEGG) || !c.TRELLO) throw new Error('Ugyldig innholdsfil');
+  TEMPLATES = c.TEMPLATES; TRELLO = c.TRELLO; SITES = c.SITES; ANLEGG = c.ANLEGG;
+  TPL = Object.fromEntries(TEMPLATES.map(t => [t.id, t])); ANL = Object.fromEntries(ANLEGG.map(a => [a.id, a]));
+}
 
-  ['vk', 'vk_brann', 'Brannalarmanlegg', 'Brannsentral, alarmoverføring og nøkkelboks', [['vk_ukentlig', R('branntavle')], ['sprinkel_vk', ['innkobling', ...['naering', 'leil13', 'leil4'].flatMap(s => ALARM.map(i => s + '.' + i))]]]],
-  ['vk', 'vk_spr', 'Sprinkleranlegg – næring', '', [['sprinkel_vk', ['naering'], { x: ALARM }], ['vk_ukentlig', R('sprinklerrom')], ['vernerunde_halvar', ['spr_ok1', 'spr_lev', 'spr_dato', 'spr_ok2', 'spr_kontrollor', 'spr_dato2', 'spr_egen', 'spr_logg'].map(i => 'brannvern.' + i)]]],
-  ['vk', 'vk_nodlys', 'Nød- og ledelys', '', [['vk_ukentlig', R('nodlys')], ['vernerunde_halvar', ['brannvern.nodlys_ok1', ...sv('brannvern', 'nodlys'), 'brannvern.nodlys_egen', 'brannvern.nodlys_egendato']]]],
-  ['vk', 'vk_vent', 'Ventilasjon', '36.06, 36.08–36.13', [['vk_ukentlig', R('vent1', 'vent2', 'vent3')], ['vernerunde_halvar', sv('elektro', 'vent')]]],
-  ['vk', 'vk_el', 'El-tavler og sikringer', '', [['vk_ukentlig', R('sikringer')], ['vernerunde_halvar', sv('elektro', 'tavler')]]],
-  ['vk', 'vk_rulle', 'Rulletrapp', '', [['vernerunde_halvar', sv('teknisk', 'rulle')]]],
-  ['vk', 'vk_heis', 'Heis', '', [['vernerunde_halvar', sv('teknisk', 'heis')]]],
-  ['vk', 'vk_slokk', 'Håndslukkere og brannslanger', 'Med frostvakter', [['vernerunde_halvar', sv('brannvern', 'slokk')]]],
-  ['vk', 'vk_dorer', 'Branndører og rømningsveier', '', [['vernerunde_halvar', ['brannvern.dorer_ok']]]],
-  ['vk', 'vk_merk', 'Brannmerking og branninstrukser', '', [['vernerunde_halvar', ['brannvern.merk_ok', 'brannvern.ovelse_dato']]]],
-  ['vk', 'vk_hjerte', 'Hjertestarter', '', [['vernerunde_halvar', ['brannvern.hjerte_ok', 'brannvern.batteri', 'brannvern.pads']]]],
-  ['vk', 'vk_vvs', 'VVS og taksluk', '', [['vernerunde_halvar', ['diverse.vvs_ok']]]],
-  ['vk', 'vk_lys', 'Belysning inne og ute', '', [['vk_ukentlig', R('innelys', 'utelys')]]],
-  ['vk', 'vk_kamera', 'Kameraovervåking', '', [['vk_ukentlig', R('kamera')]]],
-  ['vk', 'vk_bygg', 'Bygg, uteområde og kildesortering', '', [['vk_ukentlig', R('varemottak', 'uteomrade', 'skader', 'andre')], ['vernerunde_halvar', ['diverse'], { x: ['h_vvs', 'vvs_info', 'vvs_ok'] }]]],
-
-  ['svk', 'svk_spr13', 'Sprinkleranlegg – bolig trinn 1–3', '', [['sprinkel_vk', ['leil13'], { x: ALARM }]]],
-  ['svk', 'svk_spr4', 'Sprinkleranlegg – bolig trinn 4', 'Med varmekabel VK1/VK2', [['sprinkel_vk', ['leil4'], { x: ALARM }]]],
-  ['svk', 'svk_nodlys', 'Nødlys', '', [['vernerunde', ['nodlys']]]],
-  ['svk', 'svk_el', 'El-tavler og sikringsskap', '', [['vernerunde', ['elektro']]]],
-  ['svk', 'svk_slokk', 'Håndslukkere og brannslanger', 'Med frostvakter', [['vernerunde', ['slukke']]]],
-  ['svk', 'svk_romning', 'Rømningsveier', '', [['vernerunde', ['romning']]]],
-  ['svk', 'svk_hjerte', 'Hjertestarter', '', [['vernerunde', ['hjerte']]]],
-  ['svk', 'svk_bygg', 'Bygg, orden og kildesortering', '', [['vernerunde', ['andre']]]],
-
-  ['tb', 'tb_vat', 'Sprinkleranlegg – våtventil', '', [['sprinkel_tb', ['sprinkler', 'vatventil']]]],
-  ['tb', 'tb_torr', 'Sprinkleranlegg – tørrventil', 'Med kompressor', [['sprinkel_tb', ['torrventil', 'kompressor']]]],
-  ['tb', 'tb_brann', 'Brannalarmanlegg', 'Brannsentral Røde Kors, branntavle leiligheter, alarmoverføring, nøkkelboks', [['sprinkel_tb', ['alarmtavle', 'brannsentral', 'nokkelboks']]]],
-  ['tb', 'tb_nodlys', 'Nødlys', '', [['sprinkel_tb', ['nodlys']]]],
-].map(([site, id, name, note, cov]) => ({ site, id, name, note, cov: cov.map(([t, k, o = {}]) => ({ t, k, x: o.x || [], w: o.w })) }));
-const ANL = Object.fromEntries(ANLEGG.map(a => [a.id, a]));
 
 const TYPES = {
   ok:  { opts: ['Ok', 'Ikke OK', 'N/A'], flag: ['Ikke OK'] },
@@ -363,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-01 r';
+const APP_VERSION = '2026-11-01 s';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -415,9 +75,9 @@ try { Object.assign(S.settings, JSON.parse(localStorage.getItem('insp-settings')
 S.settings.notes = S.settings.notes || {};
 S.settings.trello = S.settings.trello || {};
 S.settings.hub = S.settings.hub || {};
-if (!S.settings.hub.url) S.settings.hub.url = 'https://argus-hub.osebergdrift-2e2.workers.dev';
 try { S.hubMonth = JSON.parse(localStorage.getItem('insp-hub') || 'null'); } catch (e) { S.hubMonth = null; }
 const saveSettings = () => { try { localStorage.setItem('insp-settings', JSON.stringify(S.settings)); } catch (e) {} };
+try { const c = JSON.parse(localStorage.getItem('insp-content') || 'null'); if (c && c.src) { applyContent(c.src); S.contentAt = c.at; } } catch (e) { console.error('Innhold', e); }
 
 const timers = {}; const chains = {};
 function touch(ins) { ins.updatedAt = Date.now(); scheduleSave(ins.id); }
@@ -644,7 +304,18 @@ function installHint() {
   return `<div class="notice"><strong>Installer før du starter.</strong> Trykk på Del-knappen i Safari og velg «Legg til på Hjem-skjerm». Appen på hjemskjermen har egen lagring og virker uten dekning, så inspeksjoner du lager her i Safari blir ikke med dit.</div>`;
 }
 
+function renderGate() {
+  const h = S.settings.hub;
+  return `<section class="panel"><h2 class="h2">Koble til Argus Hub</h2>
+    <p class="muted small">Sjekklister og bygg lastes fra Hub etter at du har lagt inn koden. Du får adresse og kode av den som administrerer Argus. Alt du har gjort på denne telefonen ligger trygt og kommer tilbake når du er koblet til.</p>
+    <label class="fld"><span>Hub-adresse</span><input data-hub="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://…workers.dev" value="${esc(h.url || '')}"></label>
+    <label class="fld"><span>Hub-kode</span><input type="password" data-hub="code" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(h.code || '')}"></label>
+    ${S.gateErr || S.hubErrMsg ? `<p class="t-bad small">${esc(S.gateErr || S.hubErrMsg)}</p>` : ''}
+    <div class="row-btns"><button class="btn primary" data-act="gate-connect">${S.hubBusy ? 'Kobler til…' : 'Koble til'}</button></div>
+    <p class="muted small">Administrator: <button class="link" data-act="content-upload">last opp innholdsfil</button></p></section>`;
+}
 function renderHome() {
+  if (!TEMPLATES.length) return renderGate();
   const all = Object.values(S.ins);
   const drafts = all.filter(i => i.status !== 'complete').sort((a, b) => b.updatedAt - a.updatedAt);
   const done = all.filter(i => i.status === 'complete').sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.updatedAt - a.updatedAt);
@@ -673,6 +344,7 @@ function renderHome() {
       <label class="fld"><span>Hub-adresse</span><input id="hub-url" data-hub="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://argus-hub.navn.workers.dev" value="${esc(S.settings.hub.url || '')}"></label>
       <label class="fld"><span>Hub-kode</span><input id="hub-code" type="password" data-hub="code" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(S.settings.hub.code || '')}"></label>
       <div class="row-btns"><button class="btn" data-act="hub-test">Test Hub</button><button class="btn" data-act="hub-sync">Oppdater nå</button></div>
+      <p class="muted small">Innhold (sjekklister og anlegg): ${S.contentAt ? 'hentet fra Hub ' + new Date(S.contentAt).toLocaleDateString('nb-NO') : 'ikke hentet'}. <button class="link" data-act="content-upload">Last opp innholdsfil (administrator)</button></p>
       <h3 class="h3">Koder og lokale notater</h3>
       <p class="muted small">Lagres bare på denne telefonen. Vises øverst i sjekklisten, men kommer ikke med i PDF-en. Er med i sikkerhetskopien, så oppbevar den privat.</p>
       ${TEMPLATES.filter(t => !t.hidden).map(t => `<label class="fld"><span>${esc(t.name)}</span><textarea class="inp" id="ln-${t.id}" rows="2" data-lnote="${t.id}">${esc(S.settings.notes[t.id] || '')}</textarea></label>`).join('')}
@@ -1024,6 +696,8 @@ document.addEventListener('click', async e => {
       try { await hubFetch('GET', '/ping'); toast('Koblet til Argus Hub', 4000); hubSync(); } catch (e) { toast(hubErr(e), 8000); }
       break;
     case 'hub-sync': await hubSync(true); break;
+    case 'gate-connect': await gateConnect(); break;
+    case 'content-upload': $('#contentpick').click(); break;
     case 'export': await exportBackup(); break;
     case 'import': $('#importpick').click(); break;
   }
@@ -1538,10 +1212,12 @@ const hubRec = i => ({ id: i.id, tpl: i.templateId, name: TPL[i.templateId]?.nam
 async function hubSync(manual) {
   const c = hubCfg();
   if (!c) { if (manual === true) toast('Legg inn adresse og kode til Hub under Innstillinger først.'); return; }
-  if (S.hubBusy) return;
+  if (S.hubBusy && Date.now() - (S.hubBusyAt || 0) < 60000) return;
   if (!navigator.onLine) { if (manual === true) toast('Ingen nett. Oppdateres når du har dekning.'); return; }
-  S.hubBusy = true; S.hubErrMsg = null;
+  S.hubBusy = true; S.hubBusyAt = Date.now(); S.hubErrMsg = null;
   try {
+    try { await loadContent(); } catch (e) { if (e.status === 404) S.hubErrMsg = 'Hub har ikke innhold ennå. En administrator må laste opp innholdsfilen.'; else throw e; }
+    if (!TEMPLATES.length) { S.hubBusy = false; if (S.view !== 'ins') render(); return; }
     for (const i of Object.values(S.ins)) {
       if (i.status !== 'complete' || !TPL[i.templateId] || !i.date) continue;
       const rec = hubRec(i), sig = JSON.stringify(rec);
@@ -1559,6 +1235,35 @@ async function hubSync(manual) {
   await flushAll();
   if (S.view !== 'ins') render();
 }
+async function loadContent() {
+  if (!hubCfg() || !navigator.onLine || S.view === 'ins') return false;
+  const r = await hubFetch('GET', '/content');
+  if (!r.src) { const e = new Error('Tomt innhold'); e.status = 404; throw e; }
+  if (r.at === S.contentAt && TEMPLATES.length) return false;
+  applyContent(r.src); S.contentAt = r.at;
+  try { localStorage.setItem('insp-content', JSON.stringify({ at: r.at, src: r.src })); } catch (e) {}
+  return true;
+}
+async function gateConnect() {
+  S.gateErr = null;
+  if (!hubCfg()) { S.gateErr = 'Legg inn både adresse og kode.'; render(); return; }
+  S.hubBusy = true; render();
+  try { await hubFetch('GET', '/ping'); await loadContent(); if (!TEMPLATES.length) S.gateErr = 'Hub har ikke innhold ennå.'; }
+  catch (e) { S.gateErr = e.status === 404 ? 'Hub har ikke innhold ennå. En administrator må laste opp innholdsfilen.' : hubErr(e); }
+  S.hubBusy = false; render();
+  if (TEMPLATES.length) { toast('Koblet til. Sjekklister og bygg er lastet.', 3500); hubSync(); syncTrello(); }
+}
+$('#contentpick').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try {
+    const src = await f.text();
+    const c = new Function(src)();
+    if (!c || !Array.isArray(c.TEMPLATES) || !Array.isArray(c.SITES) || !Array.isArray(c.ANLEGG) || !c.TRELLO) throw new Error('Ugyldig innholdsfil');
+    if (!hubCfg()) throw new Error('Legg inn Hub-adresse og kode først.');
+    await hubFetch('PUT', '/content', src, true);
+    S.contentAt = null; S.gateErr = null; await loadContent(); render(); toast('Innholdet er lastet opp til Hub', 4000); hubSync();
+  } catch (err) { toast(err.status === 403 ? 'Bare administrator kan laste opp innhold.' : err.status ? hubErr(err) : 'Kunne ikke laste opp: ' + (err.message || err), 7000); }
+});
 const MONTHS = ['januar', 'februar', 'mars', 'april', 'mai', 'juni', 'juli', 'august', 'september', 'oktober', 'november', 'desember'];
 function monthRows(siteId) {
   const ym = todayISO().slice(0, 7), byId = {};
