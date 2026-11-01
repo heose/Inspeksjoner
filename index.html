@@ -68,6 +68,9 @@ section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 
 .panel { background: var(--surface); border-radius: var(--r); padding: 16px; border: 1px solid var(--line); }
 .tpl-list, .list { display: flex; flex-direction: column; gap: 8px; }
+.tpl-wrap { display: flex; flex-direction: column; } .tpl-wrap .tpl { width: 100%; }
+.draft-del { align-self: flex-end; padding: 8px 4px 2px; }
+.meta-act { display: flex; justify-content: flex-end; margin: 4px -8px -6px 0; }
 .tpl { text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
 .tpl:active, .row-main:active { background: var(--surface-2); }
 .tpl-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
@@ -201,6 +204,14 @@ a.btn.primary { color: var(--accent-ink); }
 .site-name { font: 650 20px/1.2 var(--display); display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
 .sitebtn .dot { width: 14px; height: 14px; }
 .site { display: flex; flex-direction: column; gap: 10px; }
+.fold { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 14px; color: var(--ink); font: inherit; }
+.fold:active { background: var(--surface-2); }
+.fold-t { font: 700 13px/1.2 var(--display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.fold-sum { margin-left: auto; display: flex; align-items: center; gap: 4px; font-size: 14px; color: var(--muted); }
+.fold-sum .dot { width: 10px; height: 10px; margin-left: 6px; }
+.fold .chev { transition: transform .15s; } .fold[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.fold[aria-expanded="true"] { margin-bottom: 10px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .anl { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; }
 .anl:active { background: var(--surface-2); }
 .anl-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }

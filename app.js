@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-01 å';
+const APP_VERSION = '2026-11-01 æ';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -76,7 +76,8 @@ try { Object.assign(S.settings, JSON.parse(localStorage.getItem('insp-settings')
 S.settings.notes = S.settings.notes || {};
 S.settings.trello = S.settings.trello || {};
 S.settings.hub = S.settings.hub || {};
-try { S.hubMonth = JSON.parse(localStorage.getItem('insp-hub') || 'null'); } catch (e) { S.hubMonth = null; }
+S.hubMonths = {};
+try { const o = JSON.parse(localStorage.getItem('insp-hub') || 'null'); if (o && o.months) S.hubMonths = o.months; else if (o && o.ym) S.hubMonths = { [o.ym]: { rows: o.rows || [], at: o.at || 0 } }; } catch (e) { S.hubMonths = {}; }
 const saveSettings = () => { try { localStorage.setItem('insp-settings', JSON.stringify(S.settings)); } catch (e) {} };
 try { const c = JSON.parse(localStorage.getItem('insp-content') || 'null'); if (c && c.src) { applyContent(c.src); S.contentAt = c.at; } } catch (e) { console.error('Innhold', e); }
 try { const c = JSON.parse(localStorage.getItem('insp-links') || 'null'); if (c && Array.isArray(c.links)) { S.links = c.links; S.linksAt = c.at; } } catch (e) { console.error('Lenker', e); }
@@ -254,7 +255,7 @@ function newInspection(tid) {
   S.ins[ins.id] = ins; flush(ins.id);
   openIns(ins.id);
 }
-function openSite(id) { S.site = id; S.anl = null; S.cur = null; S.showAllHist = false; S.view = 'site'; render(); window.scrollTo(0, 0); }
+function openSite(id) { S.site = id; S.anlOpen = false; S.anl = null; S.cur = null; S.showAllHist = false; S.view = 'site'; render(); window.scrollTo(0, 0); }
 function openAnl(id) { S.anl = id; S.site = ANL[id].site; S.view = 'anl'; S.cur = null; render(); window.scrollTo(0, 0); }
 function avSite(ins) {
   const site = SITES.find(x => x.id === ins.siteId);
@@ -389,7 +390,7 @@ function renderHome() {
       <span class="anl-txt"><span class="site-name">${esc(site.name)} <span class="count">${site.short}</span></span>
       <span class="rc-sub ${ss.cls === 'bad' ? 't-bad' : ''}">${esc(ss.text)}</span><span class="rc-sub">${esc(ss.rounds)}</span></span><span class="chev" aria-hidden="true">›</span></button>`;
   }).join('')}</div>${trelloHomeLine()}</section>`;
-  h += monthHtml(null);
+  h += recentHtml(null);
   return h;
 }
 
@@ -419,18 +420,21 @@ function renderSite() {
   const tplBtn = t => {
     const last = done.find(i => i.templateId === t.id); const due = dueInfo(t, last);
     const draft = Object.values(S.ins).find(i => i.templateId === t.id && i.status !== 'complete');
-    return `<button class="tpl" data-act="${draft ? 'open' : 'new'}" data-tpl="${t.id}"${draft ? ` data-id="${draft.id}"` : ''}>
+    return `<div class="tpl-wrap"><button class="tpl" data-act="${draft ? 'open' : 'new'}" data-tpl="${t.id}"${draft ? ` data-id="${draft.id}"` : ''}>
       <span class="tpl-top"><span class="tpl-name">${esc(t.name)}</span><span class="freq">${freqLabel(t)}</span></span>
       <span class="tpl-meta">${draft ? `<span class="pill warn">Påbegynt ${fmt(draft.date)}, trykk for å fortsette</span>` : `<span class="pill ${due.cls}">${due.text}</span>`}${last ? `<span class="muted small">Sist ${fmt(last.date)}</span>` : ''}</span>
-    </button>`;
+    </button>${draft ? `<button class="link danger draft-del" data-act="del-draft" data-id="${draft.id}">Slett kladd</button>` : ''}</div>`;
   };
   const anlBtn = (a, st) => `<button class="anl" data-act="anl" data-id="${a.id}"><span class="dot ${st.cls}" aria-hidden="true"></span>
     <span class="anl-txt"><span class="rc-title">${esc(a.name)}</span><span class="rc-sub ${st.cls === 'bad' ? 't-bad' : ''}">${esc(st.text)}</span></span><span class="chev" aria-hidden="true">›</span></button>`;
   const list = ANLEGG.filter(a => a.site === site.id).map(a => ({ a, st: anlState(a) })).sort((x, y) => rank[x.st.cls] - rank[y.st.cls]);
   let h = `<button class="btn avvik-big" data-act="avvik-new" data-site="${site.id}">Meld avvik i ${esc(site.short)}</button>`;
   h += `<section><h2 class="h2">Inspeksjoner</h2><div class="tpl-list">${site.tpls.map(id => tplBtn(TPL[id])).join('')}</div></section>`;
-  h += `<section><h2 class="h2">Anlegg <span class="count">${list.length}</span></h2><div class="list">${list.map(x => anlBtn(x.a, x.st)).join('')}</div></section>`;
-  h += monthHtml(site.id);
+  { const nb = list.filter(x => x.st.cls === 'bad').length, nw = list.filter(x => x.st.cls === 'warn').length, open = !!S.anlOpen;
+    h += `<section><button class="fold" data-act="anl-toggle" aria-expanded="${open}" aria-controls="anl-list"><span class="fold-t">Anlegg <span class="count">${list.length}</span></span>
+      <span class="fold-sum">${!open && nb ? `<span class="dot bad" aria-hidden="true"></span>${nb} <span class="sr">forfalt</span>` : ''}${!open && nw ? `<span class="dot warn" aria-hidden="true"></span>${nw} <span class="sr">snart</span>` : ''}</span><span class="chev" aria-hidden="true">›</span></button>
+      ${open ? `<div class="list" id="anl-list">${list.map(x => anlBtn(x.a, x.st)).join('')}</div>` : ''}</section>`; }
+  h += recentHtml(site.id);
   const open = siteOpen(site);
   h += `<section><h2 class="h2">Åpne handlinger <span class="count">${open.length}</span></h2>${trelloHomeLine()}`;
   h += open.length ? `<div class="list">${open.map(({ i, key, act }) => {
@@ -495,7 +499,7 @@ function renderIns() {
       ${ins.templateId === 'avvik' ? '' : `<label class="fld wide"><span>Sted</span><input id="m-site" data-meta="site" value="${esc(ins.site)}"></label>`}
       <label class="fld"><span>Dato</span><input id="m-date" type="date" data-meta="date" value="${esc(ins.date)}"></label>
       <label class="fld"><span>Utført av</span><input id="m-by" data-meta="by" value="${esc(ins.by)}"></label>
-    </div></section>`;
+    </div>${ins.status !== 'complete' ? `<div class="meta-act"><button class="link danger" data-act="del-draft" data-id="${ins.id}">Slett kladd</button></div>` : ''}</section>`;
   if (ins.templateId === 'avvik') {
     const site = SITES.find(x => x.id === ins.siteId);
     h += `<section class="panel avf"><h2 class="h3">Hvor er avviket?</h2>
@@ -640,11 +644,16 @@ document.addEventListener('click', async e => {
     case 'new': newInspection(b.dataset.tpl); break;
     case 'open': openIns(b.dataset.id); if (b.dataset.focus) { const el = document.getElementById('it-' + b.dataset.focus); if (el) el.scrollIntoView({ block: 'center' }); } break;
     case 'hist-all': S.showAllHist = true; render(); break;
+    case 'anl-toggle': S.anlOpen = !S.anlOpen; render(); break;
     case 'del-ins':
       if (!b.dataset.armed) { arm(b, 'Bekreft sletting'); break; }
-      { const victim = S.ins[b.dataset.id]; delete S.ins[b.dataset.id]; await DB.del('inspections', b.dataset.id);
-        for (const a of Object.values(victim.answers)) for (const p of a.photos || []) DB.del('photos', p);
-        render(); toast('Inspeksjonen er slettet'); }
+      await deleteIns(b.dataset.id); render(); toast('Inspeksjonen er slettet');
+      break;
+    case 'del-draft':
+      if (!b.dataset.armed) { arm(b, 'Trykk igjen for å slette'); break; }
+      { const id = b.dataset.id, inside = S.cur === id;
+        await deleteIns(id); toast('Kladden er slettet');
+        if (inside) goHome(); else render(); }
       break;
     case 'set': {
       const a = A(ins, key); a.value = a.value === b.dataset.val ? null : b.dataset.val;
@@ -730,6 +739,16 @@ document.addEventListener('click', async e => {
     case 'import': $('#importpick').click(); break;
   }
 });
+async function deleteIns(id) {
+  const victim = S.ins[id]; if (!victim) return;
+  clearTimeout(timers[id]); delete timers[id];
+  delete S.ins[id]; if (S.cur === id) S.cur = null;
+  try { await chains[id]; } catch (e) {}
+  delete chains[id];
+  await DB.del('inspections', id);
+  for (const a of Object.values(victim.answers || {})) for (const p of a.photos || []) DB.del('photos', p);
+  anlCache = null;
+}
 function arm(b, label) {
   const old = b.textContent; b.dataset.armed = '1'; b.textContent = label; b.classList.add('armed');
   setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = old; b.classList.remove('armed'); } }, 3500);
@@ -1255,12 +1274,14 @@ async function hubSync(manual) {
       await hubFetch('PUT', '/log/' + i.id, rec);
       i.hubSig = sig; await saveIns(i);
     }
-    const ym = todayISO().slice(0, 7);
-    const m = await hubFetch('GET', '/month/' + ym);
+    const yms = recentMonths(6), cur = yms[0], now = Date.now();
+    const need = yms.filter(y => y === cur || manual === true || !S.hubMonths[y] || now - S.hubMonths[y].at > 6 * 3600e3);
+    const got = await Promise.all(need.map(async y => { try { return [y, await hubFetch('GET', '/month/' + y)]; } catch (e) { if (y === cur || e.status === 401) throw e; return null; } }));
     try { await loadLinks(); } catch (e) { if (e.status === 401) throw e; }
     try { S.inbox = (await hubFetch('GET', '/inbox')).items || []; } catch (e) { if (e.status === 401) throw e; S.inbox = S.inbox || null; }
-    S.hubMonth = { ym, rows: m.rows || [], at: Date.now() };
-    try { localStorage.setItem('insp-hub', JSON.stringify(S.hubMonth)); } catch (e) {}
+    for (const g of got) if (g) S.hubMonths[g[0]] = { rows: g[1].rows || [], at: Date.now() };
+    for (const y of Object.keys(S.hubMonths)) if (!yms.includes(y)) delete S.hubMonths[y];
+    try { localStorage.setItem('insp-hub', JSON.stringify({ months: S.hubMonths })); } catch (e) {}
     if (manual === true) toast('Oppdatert fra Hub');
   } catch (e) { S.hubErrMsg = hubErr(e); console.error(e); if (manual === true) toast(S.hubErrMsg, 8000); }
   S.hubBusy = false;
@@ -1437,18 +1458,23 @@ async function ibReject(id) {
   catch (e) { toast(hubErr(e), 6000); }
   render();
 }
-const MONTHS = ['januar', 'februar', 'mars', 'april', 'mai', 'juni', 'juli', 'august', 'september', 'oktober', 'november', 'desember'];
-function monthRows(siteId) {
-  const ym = todayISO().slice(0, 7), byId = {};
-  if (S.hubMonth && S.hubMonth.ym === ym) for (const r of S.hubMonth.rows) byId[r.id] = r;
-  for (const i of Object.values(S.ins)) if (i.status === 'complete' && TPL[i.templateId] && (i.date || '').slice(0, 7) === ym) byId[i.id] = hubRec(i);
-  return Object.values(byId).filter(r => r.tpl !== 'avvik' && (!siteId || r.siteId === siteId)).sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.at || 0) - (a.at || 0));
+function recentMonths(n) {
+  let [y, m] = todayISO().slice(0, 7).split('-').map(Number); const out = [];
+  for (let k = 0; k < n; k++) { out.push(`${y}-${String(m).padStart(2, '0')}`); if (--m < 1) { m = 12; y--; } }
+  return out;
 }
-function monthHtml(siteId) {
-  const rows = monthRows(siteId), c = hubCfg(), ym = todayISO().slice(0, 7);
-  const fresh = S.hubMonth && S.hubMonth.ym === ym ? new Date(S.hubMonth.at).toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' }) : null;
-  let h = `<section><h2 class="h2">Gjennomført i ${MONTHS[+ym.slice(5) - 1]} <span class="count">${rows.length}</span></h2>`;
-  h += rows.length ? `<div class="list">${rows.map(r => `<div class="mrow"><span class="rc-title">${esc(r.name)}</span><span class="rc-sub">${siteId ? '' : esc(SITES.find(s => s.id === r.siteId)?.short || '') + ' · '}${fmt(r.date)}${r.by ? ' · ' + esc(r.by) : ''}${r.flags ? ` · <b class="t-bad">${r.flags} avvik</b>` : ''}</span></div>`).join('')}</div>` : '<p class="empty">Ingen fullførte inspeksjoner denne måneden.</p>';
+const RECENT_N = 10;
+function recentRows(siteId) {
+  const byId = {};
+  for (const mo of Object.values(S.hubMonths || {})) for (const r of mo.rows || []) byId[r.id] = r;
+  for (const i of Object.values(S.ins)) if (i.status === 'complete' && TPL[i.templateId] && i.date) byId[i.id] = hubRec(i);
+  return Object.values(byId).filter(r => r.tpl !== 'avvik' && (!siteId || r.siteId === siteId)).sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.at || 0) - (a.at || 0)).slice(0, RECENT_N);
+}
+function recentHtml(siteId) {
+  const rows = recentRows(siteId), c = hubCfg(), mo = S.hubMonths && S.hubMonths[recentMonths(1)[0]];
+  const fresh = mo ? new Date(mo.at).toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' }) : null;
+  let h = `<section><h2 class="h2">Siste inspeksjoner</h2>`;
+  h += rows.length ? `<div class="list">${rows.map(r => `<div class="mrow"><span class="rc-title">${esc(r.name)}</span><span class="rc-sub">${siteId ? '' : esc(SITES.find(s => s.id === r.siteId)?.short || '') + ' · '}${fmt(r.date)}${r.by ? ' · ' + esc(r.by) : ''}${r.flags ? ` · <b class="t-bad">${r.flags} avvik</b>` : ''}</span></div>`).join('')}</div>` : '<p class="empty">Ingen fullførte inspeksjoner ennå.</p>';
   h += c ? `<div class="tr-line"><span class="${S.hubErrMsg ? 't-bad ' : 'muted '}small">${S.hubErrMsg ? esc(S.hubErrMsg) : fresh ? 'Oppdatert kl. ' + fresh : 'Ikke hentet ennå'}</span><button class="link" data-act="hub-sync">${S.hubBusy ? 'Oppdaterer…' : 'Oppdater nå'}</button></div>`
     : '<p class="muted small">Koble til Argus Hub under Innstillinger for å se det alle har gjort.</p>';
   return h + '</section>';
