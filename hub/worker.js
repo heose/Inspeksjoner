@@ -108,7 +108,7 @@ async function snowForecast(now = new Date()) {
   };
 }
 
-async function snowCard(env, f, msg) {
+async function snowCard(env, f, msg, test) {
   const key = SECRET(env, 'trello_key'), token = SECRET(env, 'trello_token');
   if (!key || !token) return null;
   const tr = async (path, params) => {
@@ -120,7 +120,7 @@ async function snowCard(env, f, msg) {
     return r.json();
   };
   const due = new Date(Math.max(Date.now() + 3600e3, f.start - 2 * 3600e3)).toISOString();
-  const c = await tr('cards', { idList: SNOW.list, pos: 'top', due, name: `Snøberedskap ${SNOW.name} – ${osloDay(new Date(f.start))}`, desc: msg + '\n\nKilde: MET Locationforecast. Opprettet automatisk av Argus Hub.' });
+  const c = await tr('cards', { idList: SNOW.list, pos: 'top', due, name: `${test ? 'TEST – ' : ''}Snøberedskap ${SNOW.name} – ${osloDay(new Date(f.start))}`, desc: msg + '\n\nKilde: MET Locationforecast. Opprettet automatisk av Argus Hub.' });
   try {
     const cl = await tr(`cards/${c.id}/checklists`, { name: 'Snøberedskap' });
     for (const x of SNOW_TODO) await tr(`checklists/${cl.id}/checkItems`, { name: x });
@@ -128,18 +128,19 @@ async function snowCard(env, f, msg) {
   return { id: c.id, shortUrl: c.shortUrl };
 }
 
-// o.dry: bare analyse. o.force: hopp over sesong. Ellers full kjøring med dempning og utsending.
+// o.dry: bare analyse. o.force: hopp over sesong. o.demo: full kjøring med fiktiv prognose, merket TEST, uten dempning.
+// Ellers full kjøring med dempning og utsending.
 async function snowCheck(env, o = {}) {
   const now = new Date();
-  if (!o.force && !SNOW.months.includes(now.getUTCMonth())) return { skipped: 'utenfor sesong' };
-  const f = await snowForecast(now);
+  if (!o.force && !o.demo && !SNOW.months.includes(now.getUTCMonth())) return { skipped: 'utenfor sesong' };
+  const f = o.demo ? { trigger: true, peak: 4.8, start: now.getTime() + 3 * 3600e3, tmin: -1, n: 0, hours: [] } : await snowForecast(now);
   if (o.dry || !f.trigger) return { ...f, sent: false };
-  if (await env.ARGUS.get('snow:last')) return { ...f, sent: false, quiet: true };
+  if (!o.demo && await env.ARGUS.get('snow:last')) return { ...f, sent: false, quiet: true };
   const mm = f.peak.toFixed(f.peak < 10 ? 1 : 0).replace('.', ',');
-  const msg = `Snø ventet ved ${SNOW.name} fra kl. ${osloClock(new Date(f.start))}: ca. ${mm} mm nedbør (omtrent ${Math.round(f.peak)}–${Math.round(f.peak * 2)} cm snø) i løpet av 12 t, ned til ${Math.round(f.tmin)} °C.`;
-  let card = null; try { card = await snowCard(env, f, msg); } catch (e) { /* push går uansett */ }
-  const pushed = await varsle(env, { title: 'Argus – snø', message: msg + (card ? ' Trello-kort er laget.' : ''), url: card && card.shortUrl, urlTitle: card ? 'Åpne kortet' : undefined });
-  if (card || pushed) await env.ARGUS.put('snow:last', JSON.stringify({ at: Date.now(), card: card && card.shortUrl }), { expirationTtl: SNOW.quiet });
+  const msg = (o.demo ? 'TEST (fiktiv prognose): ' : '') + `Snø ventet ved ${SNOW.name} fra kl. ${osloClock(new Date(f.start))}: ca. ${mm} mm nedbør (omtrent ${Math.round(f.peak)}–${Math.round(f.peak * 2)} cm snø) i løpet av 12 t, ned til ${Math.round(f.tmin)} °C.`;
+  let card = null; try { card = await snowCard(env, f, msg, o.demo); } catch (e) { /* push går uansett */ }
+  const pushed = await varsle(env, { title: o.demo ? 'Argus – snø (test)' : 'Argus – snø', message: msg + (card ? ' Trello-kort er laget.' : ''), url: card && card.shortUrl, urlTitle: card ? 'Åpne kortet' : undefined });
+  if (!o.demo && (card || pushed)) await env.ARGUS.put('snow:last', JSON.stringify({ at: Date.now(), card: card && card.shortUrl }), { expirationTtl: SNOW.quiet });
   return { ...f, sent: !!(card || pushed), pushed, card: card && card.shortUrl };
 }
 
@@ -220,12 +221,13 @@ export default {
       // GET /ping
       if (req.method === 'GET' && p[0] === 'ping') return json(req, { ok: true, ts: Date.now() });
 
-      // GET /snow  –  analyse av prognosen uten å sende noe.  POST /snow (bare administrator): kjør som cron.  POST /snow?test=1: send testvarsel.
+      // GET /snow  –  analyse av prognosen uten å sende noe.  POST /snow (bare administrator): kjør som cron.  POST /snow?test=1: send testvarsel.  POST /snow?demo=1: full kjede med fiktiv prognose (TEST-kort i Trello).
       if (p[0] === 'snow' && !p[1]) {
         if (req.method === 'GET') return json(req, await snowCheck(env, { dry: true, force: true }));
         if (req.method === 'POST') {
           if (!user.admin) return json(req, { error: 'Bare administrator' }, 403);
           if (url.searchParams.get('test')) return json(req, { ok: await varsle(env, { title: 'Argus – test', message: 'Testvarsel for snøvarsling' }) });
+          if (url.searchParams.get('demo')) return json(req, await snowCheck(env, { demo: true }));
           return json(req, await snowCheck(env));
         }
       }
