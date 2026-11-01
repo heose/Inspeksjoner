@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-01 u';
+const APP_VERSION = '2026-11-01 v';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -1284,6 +1284,13 @@ async function hubBlob(path) {
   return r.blob();
 }
 const fmtWhen = t => new Date(t).toLocaleString('nb-NO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+const guessSite = it => {
+  if (it.site && SITES.some(x => x.id === it.site)) return it.site;
+  const norm = x => ' ' + String(x || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim() + ' ';
+  const w = norm(it.where);
+  const sc = SITES.map(x => ({ id: x.id, n: w.includes(norm(x.name)) ? 100 + x.name.length : (w.includes(norm(x.short)) || w.includes(norm(x.id))) ? 10 : 0 })).filter(x => x.n).sort((p, q) => q.n - p.n);
+  return sc.length && (sc.length === 1 || sc[0].n > sc[1].n) ? sc[0].id : '';
+};
 const ibTitle = it => { const t = (it.text || '').replace(/\s+/g, ' ').trim(); return t.length > 70 ? t.slice(0, 67) + '…' : t; };
 async function loadInboxPics() {
   let any = false;
@@ -1301,8 +1308,9 @@ function renderInbox() {
   let h = '';
   if (!ny.length) h += '<p class="empty">Ingen nye innmeldinger.</p>';
   h += ny.map(it => {
-    const ed = S.ibEdit[it.id] || {}, site = ed.site ?? (it.site === 'ukjent' ? '' : it.site);
+    const ed = S.ibEdit[it.id] || {}, site = ed.site ?? guessSite(it);
     return `<section class="panel ib"><div class="ib-top"><strong>${esc(it.name)}</strong> <a href="tel:${esc(it.phone.replace(/[^\d+]/g, ''))}">${esc(it.phone)}</a><span class="muted small">${esc(fmtWhen(it.at))}</span></div>
+      ${it.where ? `<p class="muted small ib-where">Oppgitt bygg/leietaker: <strong>${esc(it.where)}</strong></p>` : ''}
       <p class="ib-text">${esc(it.text)}</p>
       ${it.pics ? `<div class="ib-pics">${Array.from({ length: it.pics }, (_, i) => S.inboxPics[it.id + ':' + i] ? `<img src="${S.inboxPics[it.id + ':' + i]}" alt="Bilde ${i + 1} fra innmeldingen">` : '<span class="muted small">Laster bilde …</span>').join('')}</div>` : ''}
       <label class="fld"><span>Bygg</span><select class="inp" data-ib="site" data-id="${it.id}"><option value="">Velg bygg</option>${SITES.map(x => `<option value="${x.id}"${x.id === site ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
@@ -1322,7 +1330,7 @@ async function extLabel() {
 }
 async function ibApprove(id, btn) {
   const it = (S.inbox || []).find(x => x.id === id); if (!it || S.ibBusy) return;
-  const ed = S.ibEdit[id] ||= {}, siteId = ed.site ?? (it.site === 'ukjent' ? '' : it.site), site = SITES.find(x => x.id === siteId);
+  const ed = S.ibEdit[id] ||= {}, siteId = ed.site ?? guessSite(it), site = SITES.find(x => x.id === siteId);
   if (!site) { toast('Velg bygg først.'); return; }
   const listId = TRELLO.lists[site.tl]; if (!listId) { toast('Fant ikke Trello-listen for bygget.'); return; }
   if (!navigator.onLine) { toast('Du må ha nett for å godkjenne.'); return; }
@@ -1330,7 +1338,7 @@ async function ibApprove(id, btn) {
   try {
     if (!ed.cardId) {
       const lab = await extLabel().catch(() => null);
-      const desc = `**Ekstern melding** (${fmtWhen(it.at)})\n**Fra:** ${it.name}, ${it.phone}\n**Bygg:** ${site.name}\n\n${it.text}`;
+      const desc = `**Ekstern melding** (${fmtWhen(it.at)})\n**Fra:** ${it.name}, ${it.phone}\n**Bygg:** ${site.name}${it.where ? '\n**Oppgitt av avsender:** ' + it.where : ''}\n\n${it.text}`;
       const params = { idList: listId, name: (ed.title ?? ibTitle(it)).trim() || ibTitle(it), desc, pos: 'top' }; if (lab) params.idLabels = lab;
       const c = await tfetch('POST', 'cards', params); ed.cardId = c.id; ed.cardUrl = c.shortUrl || c.url || ''; ed.pics = 0;
     }

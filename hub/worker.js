@@ -35,7 +35,6 @@ const TR_ALLOW = [
 
 // ---------- Ekstern innmelding (åpen, uten kode, men med robotsjekk og grenser) ----------
 const SECRET = (env, n) => { const k = Object.keys(env).find(x => x.toLowerCase() === n); return k ? env[k] : undefined; };
-const SITE_IDS = ['op', 'vk', 'svk', 'tb', 'ukjent'];
 const MELD_TTL = 90 * 86400, MAX_BODY = 6 * 1024 * 1024, MAX_PICS = 3, MAX_PIC_CHARS = 2 * 1024 * 1024;
 const MELD_PER_HOUR = 5, MELD_PER_DAY = 100;
 const fromB64 = s => { const bin = atob(s); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; };
@@ -63,7 +62,8 @@ async function melding(req, env) {
   if (!v.success || (v.hostname && v.hostname !== 'heose.github.io' && v.hostname !== 'localhost')) return json(req, { error: 'Robotsjekken feilet. Last siden på nytt og prøv igjen.' }, 400);
 
   const t = x => String(x == null ? '' : x).trim();
-  const text = t(d.text), name = t(d.name), phone = t(d.phone), site = SITE_IDS.includes(d.site) ? d.site : 'ukjent';
+  const text = t(d.text), name = t(d.name), phone = t(d.phone), where = t(d.where);
+  if (where.length < 2 || where.length > 100) return json(req, { error: 'Skriv hvilket bygg eller hvilken leietaker det gjelder.' }, 400);
   if (text.length < 5 || text.length > 2000) return json(req, { error: 'Beskriv saken med 5 til 2000 tegn.' }, 400);
   if (name.length < 2 || name.length > 80) return json(req, { error: 'Skriv navnet ditt.' }, 400);
   if (!/^[+\d][\d\s()+-]{5,29}$/.test(phone)) return json(req, { error: 'Skriv et telefonnummer vi kan ringe.' }, 400);
@@ -77,7 +77,7 @@ async function melding(req, env) {
   }
   const id = crypto.randomUUID();
   for (let i = 0; i < bytes.length; i++) await env.ARGUS.put(`inboxpic:${id}:${i}`, bytes[i], { expirationTtl: MELD_TTL });
-  await env.ARGUS.put(`inbox:${id}`, JSON.stringify({ id, at: Date.now(), status: 'ny', site, text, name, phone, pics: bytes.length }), { expirationTtl: MELD_TTL });
+  await env.ARGUS.put(`inbox:${id}`, JSON.stringify({ id, at: Date.now(), status: 'ny', where, text, name, phone, pics: bytes.length }), { expirationTtl: MELD_TTL });
   return json(req, { ok: true });
 }
 

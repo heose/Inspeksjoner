@@ -21,12 +21,6 @@
   input[type=text], input[type=tel], textarea { width:100%; font:inherit; color:var(--ink); background:var(--surface); border:1px solid var(--line); border-radius:var(--r); padding:12px 14px; min-height:48px; -webkit-appearance:none; appearance:none; }
   textarea { min-height:120px; resize:vertical; }
   input:focus, textarea:focus, button:focus-visible { outline:3px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset:1px; }
-  .seg { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-  .seg label { margin:0; font-weight:500; }
-  .seg input { position:absolute; opacity:0; pointer-events:none; }
-  .seg span { display:flex; align-items:center; justify-content:center; text-align:center; min-height:48px; padding:8px 10px; background:var(--surface); border:1px solid var(--line); border-radius:var(--r); cursor:pointer; }
-  .seg input:checked + span { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:600; }
-  .seg input:focus-visible + span { outline:3px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset:1px; }
   .pics { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
   .thumb { position:relative; width:84px; height:84px; border-radius:10px; overflow:hidden; border:1px solid var(--line); }
   .thumb img { width:100%; height:100%; object-fit:cover; display:block; }
@@ -48,19 +42,13 @@
 <main>
   <p class="co">Oseberg Drift og Service</p>
   <h1>Meld fra om feil eller avvik</h1>
-  <p class="lead">Se noe som er ødelagt, farlig eller bør sjekkes? Send oss en kort melding, gjerne med bilde. Vi tar kontakt om noe er uklart.</p>
+  <p class="lead">Se noe som er ødelagt, farlig eller bør sjekkes? Send en kort melding, gjerne med bilde. Vi tar kontakt om noe er uklart.</p>
   <p class="urgent"><strong>Akutt fare for liv eller helse:</strong> ring 110, 112 eller 113 først. Dette skjemaet er ikke for nødsituasjoner.</p>
 
   <form id="f" novalidate>
     <div>
-      <span class="lbl" id="l-bygg">Hvilket bygg?</span>
-      <div class="seg" role="radiogroup" aria-labelledby="l-bygg">
-        <label><input type="radio" name="site" value="op"><span>Olsrød Park</span></label>
-        <label><input type="radio" name="site" value="vk"><span>Vekterkvartalet</span></label>
-        <label><input type="radio" name="site" value="svk"><span>Sameiet VK</span></label>
-        <label><input type="radio" name="site" value="tb"><span>Tollbodgata 14</span></label>
-        <label style="grid-column:1/-1"><input type="radio" name="site" value="ukjent" checked><span>Vet ikke / annet</span></label>
-      </div>
+      <label for="where">Hvilket bygg eller hvilken leietaker gjelder det? <span class="hint">(f.eks. adresse eller butikknavn)</span></label>
+      <input type="text" id="where" maxlength="100" autocomplete="off">
     </div>
     <div>
       <label for="text">Hva er galt, og hvor? <span class="hint">(etasje, rom, utgang …)</span></label>
@@ -150,8 +138,9 @@ $('#file').addEventListener('change', async e => {
 
 $('#f').addEventListener('submit', async e => {
   e.preventDefault(); if (busy) return; showErr('');
-  const text = $('#text').value.trim(), name = $('#name').value.trim(), phone = $('#phone').value.trim();
+  const where = $('#where').value.trim(), text = $('#text').value.trim(), name = $('#name').value.trim(), phone = $('#phone').value.trim();
   const token = window.turnstile && tsId !== null ? window.turnstile.getResponse(tsId) : '';
+  if (where.length < 2) return showErr('Skriv hvilket bygg eller hvilken leietaker det gjelder.');
   if (text.length < 5) return showErr('Beskriv kort hva som er galt og hvor.');
   if (name.length < 2) return showErr('Skriv navnet ditt.');
   if (!/^[+\d][\d\s()+-]{5,29}$/.test(phone)) return showErr('Skriv et telefonnummer vi kan ringe.');
@@ -160,7 +149,7 @@ $('#f').addEventListener('submit', async e => {
   try {
     const r = await fetch(HUB + '/melding', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ site: (document.querySelector('input[name=site]:checked') || {}).value, text, name, phone, website: $('#website').value, token, pics: pics.map(p => p.b64) }),
+      body: JSON.stringify({ where, text, name, phone, website: $('#website').value, token, pics: pics.map(p => p.b64) }),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || 'Noe gikk galt. Prøv igjen, eller ring oss.');
