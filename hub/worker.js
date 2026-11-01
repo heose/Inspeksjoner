@@ -73,10 +73,6 @@ const SNOW_TODO = [
   'Merke p-plasser (snørydding)',
   'Sjekke at rømningsveier og nødutganger er frie for snø og is',
   'Brøyte/strø inngangsparti, varemottak og rømningsveier',
-  'Sjekke at atkomst for brannvesen, brannkum og sprinklerinntak er fri',
-  'Sjekke tak, nedløp og sluk',
-  'Sjekke at ytterdører og porter fungerer',
-  'Varsle leietakere ved behov',
 ];
 const osloDay = d => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Oslo' }).format(d);
 const osloClock = d => new Intl.DateTimeFormat('nb-NO', { timeZone: 'Europe/Oslo', hour: '2-digit', minute: '2-digit' }).format(d);
