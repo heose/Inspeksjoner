@@ -50,9 +50,9 @@ Hub tillater bare kallene appen trenger mot tavlen Vaktmester. Bytter du token i
 
 ## Ekstern innmelding (leietakere og andre)
 
-Åpen side: `https://heose.github.io/Inspeksjoner/melding.html` (del lenken på SMS, eller bruk QR-koden).
+Åpen side: `https://argus.osebergdrift.no/melding.html` (del lenken på SMS, eller bruk QR-koden).
 
-1. Cloudflare → Turnstile → Add widget. Hostname `heose.github.io`, modus Managed. Site key står i `melding.html`.
+1. Cloudflare → Turnstile → Add widget. Hostname `argus.osebergdrift.no` (behold `heose.github.io` til overgangen er ferdig), modus Managed. Site key står i `melding.html`.
 2. Worker → Variables and Secrets → secret `TURNSTILE_SECRET` (Secret key fra Turnstile).
 3. Lim inn nyeste `hub/worker.js` og Deploy.
 4. Avsender skriver bygg eller leietaker i fritekst (ingen bygg vises på siden, så den kan brukes for flere kunder). I Argus dukker meldinger opp som «Innmeldinger» på forsiden (oppdateres ved synk, eller trykk Oppdater nå). Velg bygg, rediger tittel og trykk Godkjenn til Trello. Kortet får etikett «Ekstern melding», bilder og kontaktinfo.

@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-01 å6';
+const APP_VERSION = '2026-11-01 å7';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -365,7 +365,7 @@ function renderHome() {
       <details class="how"><summary>Slik får du nøkkel og token</summary><ol>
         <li>Åpne <a href="https://trello.com/power-ups/admin" target="_blank" rel="noopener">trello.com/power-ups/admin</a> og velg Create new Power-Up. Navn: Argus. Velg arbeidsområdet ditt og fyll inn e-post. Feltet for iframe-adresse kan stå tomt.</li>
         <li>Åpne Power-Up-en, velg API key og trykk Generate a new API key. Kopier nøkkelen hit.</li>
-        <li>Under Allowed origins legger du til <b>https://heose.github.io</b> og lagrer.</li>
+        <li>Under Allowed origins legger du til <b>https://argus.osebergdrift.no</b> og lagrer.</li>
         <li>Trykk Hent token her, trykk Allow i Trello, og kopier token-teksten hit.</li>
       </ol></details>`}
       <h3 class="h3">Argus Hub</h3>
@@ -1219,7 +1219,7 @@ function trelloErr(e) {
   if (e.status === 401) return 'Trello avviste nøkkel eller token. Sjekk at begge er limt inn riktig, uten mellomrom.';
   if (e.status === 404) return 'Trello finner ikke tavlen Vaktmester. Har kontoen din tilgang?';
   if (e.status) return `Trello ga feil ${e.status}. ${e.body || ''}`;
-  return navigator.onLine ? 'Fikk ikke kontakt med Trello. Sjekk at https://heose.github.io er lagt til under Allowed origins for API-nøkkelen.' : 'Ingen nett. Handlingene sendes når du har dekning igjen.';
+  return navigator.onLine ? 'Fikk ikke kontakt med Trello. Sjekk at https://argus.osebergdrift.no er lagt til under Allowed origins for API-nøkkelen.' : 'Ingen nett. Handlingene sendes når du har dekning igjen.';
 }
 async function trelloMembers() {
   const t = S.settings.trello;
