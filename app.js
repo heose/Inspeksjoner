@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-01 w';
+const APP_VERSION = '2026-11-01 x';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
