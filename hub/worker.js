@@ -190,6 +190,29 @@ export default {
         }
       }
 
+      // GET /links  –  PUT /links (bare administrator): lenker og skjema som deles fra Argus
+      if (p[0] === 'links' && !p[1]) {
+        if (req.method === 'GET') {
+          const { value, metadata } = await env.ARGUS.getWithMetadata('links');
+          if (!value) return json(req, { error: 'Ingen lenker' }, 404);
+          return json(req, { links: JSON.parse(value), at: (metadata && metadata.at) || 0 });
+        }
+        if (req.method === 'PUT') {
+          if (!user.admin) return json(req, { error: 'Bare administrator kan endre lenker' }, 403);
+          let d; try { d = await req.json(); } catch (e) { return json(req, { error: 'Ugyldig JSON' }, 400); }
+          if (!d || !Array.isArray(d.links) || d.links.length > 60) return json(req, { error: 'Ugyldig liste' }, 400);
+          const clean = [];
+          for (const l of d.links) {
+            const str = (v, n) => String(v == null ? '' : v).slice(0, n);
+            const url = str(l && l.url, 1500).trim();
+            if (!/^https:\/\//i.test(url)) return json(req, { error: 'Lenker må starte med https://' }, 400);
+            clean.push({ id: str(l.id, 40) || Math.random().toString(36).slice(2, 10), title: str(l.title, 100).trim() || 'Uten navn', desc: str(l.desc, 200).trim(), url, group: l.group === 'intern' ? 'intern' : 'share' });
+          }
+          await env.ARGUS.put('links', JSON.stringify(clean), { metadata: { at: Date.now(), by: user.name } });
+          return json(req, { ok: true, n: clean.length });
+        }
+      }
+
       // PUT /log/:id   (JSON: { id, date, ... })
       if (req.method === 'PUT' && p[0] === 'log' && p[1]) {
         const rec = await req.json();

@@ -185,6 +185,17 @@ textarea.inp { resize: vertical; line-height: 1.4; }
 .avvik-big { width: 100%; background: var(--bad); border-color: var(--bad); color: #fff; font-size: 17px; padding: 15px; }
 .avf { display: flex; flex-direction: column; gap: 10px; }
 .avf select { width: 100%; font: inherit; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+.linkbtn { display: flex; align-items: center; justify-content: space-between; width: 100%; margin: 0 0 12px; text-align: left; padding: 14px 16px; }
+.linkcard { display: flex; flex-direction: column; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px; }
+.lk-t { font: 650 18px/1.25 var(--display); }
+a.btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; color: var(--ink); }
+a.btn.primary { color: var(--accent-ink); }
+.btn:disabled, .btn[disabled] { opacity: .4; }
+.qr-ov { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.65); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.qr-card { background: var(--surface); border-radius: 16px; padding: 18px; width: min(100%, 420px); display: flex; flex-direction: column; gap: 12px; align-items: stretch; text-align: center; max-height: 100%; overflow: auto; }
+.qr-img { background: #fff; border-radius: 12px; padding: 6px; } .qr-img svg { display: block; width: 100%; height: auto; max-width: 360px; margin: 0 auto; }
+.qr-url { word-break: break-all; }
+.linkcard .row-btns .btn { min-width: 0; padding-left: 8px; padding-right: 8px; }
 .sitebtn { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 18px 16px; }
 .sitebtn:active { background: var(--surface-2); }
 .site-name { font: 650 20px/1.2 var(--display); display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
@@ -216,6 +227,7 @@ textarea.inp { resize: vertical; line-height: 1.4; }
 <input type="file" id="filepick" accept="image/*" multiple hidden>
 <input type="file" id="importpick" accept="application/json,.json" hidden>
 <input type="file" id="contentpick" hidden>
+<script src="qr.js"></script>
 <script src="pdf.js"></script>
 <script src="app.js"></script>
 </body>

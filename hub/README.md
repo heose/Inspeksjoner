@@ -69,3 +69,11 @@ Hub sender et varsel («Ny innmelding venter på godkjenning») hver gang noen s
 4. Lim inn nyeste `hub/worker.js` og Deploy.
 
 Uten disse secretene sendes ingen varsler, og meldinger fungerer som før. Feil hos Pushover stopper aldri en innmelding.
+
+## Del lenker og skjema
+
+Egen side i Argus («Del lenker og skjema» på forsiden). Lenker til deling får QR (lages i appen, virker uten nett), Del og Kopier. Interne skjema får «Åpne skjema».
+
+- Første liste ligger i innholdsfilen (`LINKS` i `content.js`, utenfor repoet). Last den opp som vanlig.
+- Administrator kan endre listen direkte i appen («Rediger lenker» → Lagre). Da lagres den i Hub (`/links`), og alle får den ved neste synk. Lenker må starte med `https://`.
+- Lim inn nyeste `hub/worker.js` og Deploy.

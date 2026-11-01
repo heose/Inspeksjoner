@@ -3,12 +3,12 @@
 
 /* ---------- Innhold (sjekklister, bygg, anlegg) ----------
    Ligger ikke i appen. Lastes fra Hub etter at Hub-koden er lagt inn, og lagres lokalt så alt virker uten nett. */
-let TEMPLATES = [], TPL = {}, SITES = [], ANLEGG = [], ANL = {}, TRELLO = { done: '', board: '', lists: {} };
+let TEMPLATES = [], TPL = {}, SITES = [], ANLEGG = [], ANL = {}, TRELLO = { done: '', board: '', lists: {} }, LINKS_DEFAULT = [];
 const listKey = (ins, key) => { const t = TPL[ins.templateId]; return ins.tl || findItem(t, key).sec?.tl || t.tl; };
 function applyContent(src) {
   const c = new Function(src)();
   if (!c || !Array.isArray(c.TEMPLATES) || !Array.isArray(c.SITES) || !Array.isArray(c.ANLEGG) || !c.TRELLO) throw new Error('Ugyldig innholdsfil');
-  TEMPLATES = c.TEMPLATES; TRELLO = c.TRELLO; SITES = c.SITES; ANLEGG = c.ANLEGG;
+  TEMPLATES = c.TEMPLATES; TRELLO = c.TRELLO; SITES = c.SITES; ANLEGG = c.ANLEGG; LINKS_DEFAULT = Array.isArray(c.LINKS) ? c.LINKS : [];
   TPL = Object.fromEntries(TEMPLATES.map(t => [t.id, t])); ANL = Object.fromEntries(ANLEGG.map(a => [a.id, a]));
 }
 
@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-01 x';
+const APP_VERSION = '2026-11-01 y';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -79,6 +79,7 @@ S.settings.hub = S.settings.hub || {};
 try { S.hubMonth = JSON.parse(localStorage.getItem('insp-hub') || 'null'); } catch (e) { S.hubMonth = null; }
 const saveSettings = () => { try { localStorage.setItem('insp-settings', JSON.stringify(S.settings)); } catch (e) {} };
 try { const c = JSON.parse(localStorage.getItem('insp-content') || 'null'); if (c && c.src) { applyContent(c.src); S.contentAt = c.at; } } catch (e) { console.error('Innhold', e); }
+try { const c = JSON.parse(localStorage.getItem('insp-links') || 'null'); if (c && Array.isArray(c.links)) { S.links = c.links; S.linksAt = c.at; } } catch (e) { console.error('Lenker', e); }
 
 const timers = {}; const chains = {};
 function touch(ins) { ins.updatedAt = Date.now(); scheduleSave(ins.id); }
@@ -289,6 +290,9 @@ function render() {
   } else if (S.view === 'inbox' && S.ready) {
     bar.innerHTML = `<button class="back" data-act="home-root" aria-label="Tilbake til oversikten">‹ Oversikt</button><div class="bar-title">Innmeldinger</div><div class="bar-status"></div>`;
     app.innerHTML = renderInbox();
+  } else if (S.view === 'links' && S.ready) {
+    bar.innerHTML = `<button class="back" data-act="home-root" aria-label="Tilbake til oversikten">‹ Oversikt</button><div class="bar-title">Del lenker</div><div class="bar-status"></div>`;
+    app.innerHTML = renderLinks();
   } else if (S.view === 'ins' && cur()) {
     const t = TPL[cur().templateId];
     bar.innerHTML = `<button class="back" data-act="home" aria-label="Tilbake">‹ ${S.anl && ANL[S.anl] ? 'Anlegg' : S.site ? SITES.find(x => x.id === S.site).short : 'Oversikt'}</button><div class="bar-title">${esc(t.name)}</div><div class="bar-status" id="save-status">Lagret</div>`;
@@ -377,6 +381,7 @@ function renderHome() {
   { const nNy = (S.inbox || []).filter(x => x.status === 'ny').length;
     if (nNy) h += `<button class="btn inbox-card" data-act="inbox-open"><span class="inbox-n">${nNy}</span><span>${nNy === 1 ? 'Ny innmelding' : 'Nye innmeldinger'} fra eksterne venter på godkjenning</span><span class="chev" aria-hidden="true">›</span></button>`; }
   h += `<button class="btn avvik-big" data-act="avvik-new">Meld avvik</button>`;
+  h += `<button class="btn linkbtn" data-act="links-open"><span>Del lenker og skjema</span><span class="chev" aria-hidden="true">›</span></button>`;
   h += `<section><h2 class="h2">Velg bygg</h2><div class="list">${SITES.map(site => {
     const ss = siteState(site);
     return `<button class="sitebtn" data-act="site" data-id="${site.id}"><span class="dot ${ss.cls}" aria-hidden="true"></span>
@@ -703,6 +708,17 @@ document.addEventListener('click', async e => {
       break;
     case 'hub-sync': await syncTrello(); await hubSync(true); break;
     case 'gate-connect': await gateConnect(); break;
+    case 'links-open': S.view = 'links'; S.linkEdit = false; S.linkQr = null; render(); window.scrollTo(0, 0); loadLinks().then(ch => { if (ch && S.view === 'links') render(); }).catch(() => {}); break;
+    case 'lk-qr': S.linkQr = b.dataset.id; render(); break;
+    case 'lk-qr-close': S.linkQr = null; render(); break;
+    case 'lk-copy': await lkCopy(b.dataset.id); break;
+    case 'lk-share': await lkShare(b.dataset.id); break;
+    case 'lk-edit': S.linkDraft = clone(linksList()); S.linkEdit = true; render(); window.scrollTo(0, 0); break;
+    case 'lk-cancel': S.linkEdit = false; S.linkDraft = null; render(); break;
+    case 'lk-add': S.linkDraft.push({ id: uid(), title: '', desc: '', url: 'https://', group: 'share' }); render(); break;
+    case 'lk-up': case 'lk-down': { const a = S.linkDraft, i = a.findIndex(x => x.id === b.dataset.id), j = act === 'lk-up' ? i - 1 : i + 1; if (i >= 0 && j >= 0 && j < a.length) { [a[i], a[j]] = [a[j], a[i]]; render(); } break; }
+    case 'lk-del': if (b.dataset.armed) { S.linkDraft = S.linkDraft.filter(x => x.id !== b.dataset.id); render(); } else arm(b, 'Trykk igjen for å slette'); break;
+    case 'lk-save': await lkSave(); break;
     case 'inbox-open': S.view = 'inbox'; render(); window.scrollTo(0, 0); loadInboxPics(); hubSync(); break;
     case 'ib-ok': await ibApprove(b.dataset.id, b); break;
     case 'ib-no':
@@ -722,6 +738,7 @@ document.addEventListener('input', e => {
   const el = e.target; const ins = cur();
   if (el.dataset.trello) { const t = S.settings.trello; t[el.dataset.trello] = el.value.trim(); t.members = null; saveSettings(); return; }
   if (el.dataset.ib) { (S.ibEdit[el.dataset.id] ||= {})[el.dataset.ib] = el.value; return; }
+  if (el.dataset.lk) { const l = (S.linkDraft || []).find(x => x.id === el.dataset.id); if (l) l[el.dataset.lk] = el.value; return; }
   if (el.dataset.hub) { S.settings.hub[el.dataset.hub] = el.value.trim(); saveSettings(); return; }
   if (el.dataset.lnote) { S.settings.notes[el.dataset.lnote] = el.value; saveSettings(); return; }
   if (el.dataset.set) { S.settings[el.dataset.set] = el.value; saveSettings(); return; }
@@ -1239,6 +1256,7 @@ async function hubSync(manual) {
     }
     const ym = todayISO().slice(0, 7);
     const m = await hubFetch('GET', '/month/' + ym);
+    try { await loadLinks(); } catch (e) { if (e.status === 401) throw e; }
     try { S.inbox = (await hubFetch('GET', '/inbox')).items || []; } catch (e) { if (e.status === 401) throw e; S.inbox = S.inbox || null; }
     S.hubMonth = { ym, rows: m.rows || [], at: Date.now() };
     try { localStorage.setItem('insp-hub', JSON.stringify(S.hubMonth)); } catch (e) {}
@@ -1303,6 +1321,66 @@ async function loadInboxPics() {
   }
   if (any && S.view === 'inbox') { const y = window.scrollY; render(); window.scrollTo(0, y); }
 }
+/* ---------- Del lenker og skjema ---------- */
+const linksList = () => S.links || LINKS_DEFAULT;
+async function loadLinks() {
+  if (!hubCfg() || !navigator.onLine || S.linkEdit) return false;
+  try {
+    const r = await hubFetch('GET', '/links');
+    if (r.at === S.linksAt && S.links) return false;
+    S.links = r.links; S.linksAt = r.at;
+    try { localStorage.setItem('insp-links', JSON.stringify({ at: r.at, links: r.links })); } catch (e) {}
+    return true;
+  } catch (e) { if (e.status === 404) return false; throw e; }
+}
+const lkFind = id => linksList().find(x => x.id === id);
+async function lkCopy(id) {
+  const l = lkFind(id); if (!l) return;
+  try { await navigator.clipboard.writeText(l.url); toast('Lenken er kopiert'); }
+  catch (e) { window.prompt('Kopier lenken', l.url); }
+}
+async function lkShare(id) {
+  const l = lkFind(id); if (!l) return;
+  if (navigator.share) { try { await navigator.share({ title: l.title, text: l.title, url: l.url }); return; } catch (e) { if (e.name === 'AbortError') return; } }
+  await lkCopy(id);
+}
+async function lkSave() {
+  const d = (S.linkDraft || []).map(l => ({ ...l, title: (l.title || '').trim(), desc: (l.desc || '').trim(), url: (l.url || '').trim() }));
+  const bad = d.find(l => !/^https:\/\/\S+\.\S+/i.test(l.url));
+  if (bad) { toast('Lenken «' + (bad.title || 'uten navn') + '» må starte med https://', 5000); return; }
+  if (d.some(l => !l.title)) { toast('Alle lenker må ha et navn.', 4000); return; }
+  if (!hubCfg() || !navigator.onLine) { toast('Du må ha nett og Hub for å lagre lenkene.', 5000); return; }
+  try {
+    await hubFetch('PUT', '/links', { links: d });
+    S.links = d; S.linksAt = Date.now(); try { localStorage.setItem('insp-links', JSON.stringify({ at: S.linksAt, links: d })); } catch (e) {}
+    S.linkEdit = false; S.linkDraft = null; render(); toast('Lenkene er lagret', 3000);
+  } catch (e) { toast(e.status === 403 ? 'Bare administrator kan endre lenker.' : e.status ? hubErr(e) : 'Kunne ikke lagre: ' + (e.message || e), 6000); }
+}
+function renderLinks() {
+  if (S.linkEdit) return renderLinksEdit();
+  const ls = linksList(), share = ls.filter(l => l.group !== 'intern'), intern = ls.filter(l => l.group === 'intern');
+  let h = '';
+  if (!ls.length) h += `<p class="empty">Ingen lenker er lagt inn ennå. Trykk «Rediger lenker» nederst.</p>`;
+  if (share.length) h += `<section><h2 class="h2">Til deling</h2><p class="muted small">Vis QR-koden til leietakeren, eller del lenken rett fra telefonen.</p><div class="list">${share.map(l => `<div class="linkcard"><div class="lk-t">${esc(l.title)}</div>${l.desc ? `<div class="rc-sub">${esc(l.desc)}</div>` : ''}<div class="row-btns"><button class="btn primary" data-act="lk-qr" data-id="${esc(l.id)}">Vis QR</button><button class="btn" data-act="lk-share" data-id="${esc(l.id)}">Del</button><button class="btn" data-act="lk-copy" data-id="${esc(l.id)}">Kopier</button></div></div>`).join('')}</div></section>`;
+  if (intern.length) h += `<section><h2 class="h2">Interne skjema</h2><p class="muted small">Brukes bare internt.</p><div class="list">${intern.map(l => `<div class="linkcard"><div class="lk-t">${esc(l.title)}</div>${l.desc ? `<div class="rc-sub">${esc(l.desc)}</div>` : ''}<div class="row-btns"><a class="btn primary" href="${esc(l.url)}" target="_blank" rel="noopener">Åpne skjema</a><button class="btn" data-act="lk-copy" data-id="${esc(l.id)}">Kopier lenke</button></div></div>`).join('')}</div></section>`;
+  h += `<button class="btn" data-act="lk-edit">Rediger lenker</button>`;
+  const q = S.linkQr && lkFind(S.linkQr);
+  if (q) { let svg; try { svg = QR.svg(q.url); } catch (e) { svg = '<p class="empty">Kunne ikke lage QR-kode.</p>'; }
+    h += `<div class="qr-ov" role="dialog" aria-modal="true" aria-label="QR-kode"><div class="qr-card"><div class="lk-t">${esc(q.title)}</div><div class="qr-img">${svg}</div><div class="muted small qr-url">${esc(q.url.length > 70 ? q.url.slice(0, 67) + '…' : q.url)}</div><div class="row-btns"><button class="btn" data-act="lk-share" data-id="${esc(q.id)}">Del</button><button class="btn primary" data-act="lk-qr-close">Lukk</button></div></div></div>`; }
+  return h;
+}
+function renderLinksEdit() {
+  const d = S.linkDraft || [];
+  let h = `<p class="muted small">Bare administrator kan lagre. Lenker må starte med https://.</p><div class="list">`;
+  h += d.map((l, i) => `<div class="linkcard"><label class="fld"><span>Navn</span><input data-lk="title" data-id="${esc(l.id)}" value="${esc(l.title)}"></label>
+    <label class="fld"><span>Beskrivelse (valgfri)</span><input data-lk="desc" data-id="${esc(l.id)}" value="${esc(l.desc)}"></label>
+    <label class="fld"><span>Lenke</span><input data-lk="url" data-id="${esc(l.id)}" inputmode="url" autocapitalize="off" autocomplete="off" spellcheck="false" value="${esc(l.url)}"></label>
+    <label class="fld"><span>Hvor vises den</span><select data-lk="group" data-id="${esc(l.id)}"><option value="share"${l.group !== 'intern' ? ' selected' : ''}>Til deling (QR, Del, Kopier)</option><option value="intern"${l.group === 'intern' ? ' selected' : ''}>Intern (Åpne skjema)</option></select></label>
+    <div class="row-btns"><button class="btn" data-act="lk-up" data-id="${esc(l.id)}"${i === 0 ? ' disabled' : ''} aria-label="Flytt opp">↑</button><button class="btn" data-act="lk-down" data-id="${esc(l.id)}"${i === d.length - 1 ? ' disabled' : ''} aria-label="Flytt ned">↓</button><button class="btn" data-act="lk-del" data-id="${esc(l.id)}">Slett</button></div></div>`).join('');
+  h += `</div><button class="btn" data-act="lk-add">+ Legg til lenke</button><div class="row-btns"><button class="btn" data-act="lk-cancel">Avbryt</button><button class="btn primary" data-act="lk-save">Lagre</button></div>`;
+  return h;
+}
+
 function renderInbox() {
   const all = S.inbox || [], ny = all.filter(x => x.status === 'ny'), done = all.filter(x => x.status !== 'ny').slice(0, 10);
   let h = '';
