@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Argus</title>
-<meta name="theme-color" content="#0f5a7d">
+<meta name="theme-color" content="#058479">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -14,8 +14,8 @@
 <style>
 /* Feltverktøy: én kolonne, store trykkflater, signalfarger kun for status. */
 :root {
-  --bg: #edf1f3; --surface: #ffffff; --surface-2: #f5f7f8; --ink: #14212a; --muted: #566874; --line: #d4dce1;
-  --accent: #0f5a7d; --accent-ink: #ffffff; --accent-soft: #dfedf3;
+  --bg: #edf1f3; --surface: #ffffff; --surface-2: #f5f7f8; --ink: #1b262c; --muted: #566874; --line: #d4dce1;
+  --accent: #058479; --accent-ink: #ffffff; --accent-soft: #dcf1ee;
   --ok: #1a7a4c; --bad: #c0172f; --bad-soft: #fcebee; --na: #5e6c76; --warn: #9a6200; --warn-soft: #fbf0d9; --ok-soft: #e2f2e9;
   --act-bg: #fff5d1; --act-line: #e2bf3d; --act-ink: #5c4708;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif;
@@ -26,7 +26,7 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0d1418; --surface: #162128; --surface-2: #1c2932; --ink: #e5edf1; --muted: #93a4ae; --line: #2a3a44;
-    --accent: #5db4dc; --accent-ink: #06222f; --accent-soft: #19323f;
+    --accent: #2fc2b2; --accent-ink: #06201d; --accent-soft: #14332f;
     --ok: #3daf74; --bad: #ee5a6e; --bad-soft: #3a1d23; --na: #7f8d96; --warn: #e3a743; --warn-soft: #36290f; --ok-soft: #15301f;
     --act-bg: #2e2812; --act-line: #8a7121; --act-ink: #f0d98a;
     color-scheme: dark;
@@ -79,9 +79,9 @@ section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .pill.ok { background: var(--ok-soft); color: var(--ok); } .pill.bad { background: var(--bad-soft); color: var(--bad); }
 .pill.warn { background: var(--warn-soft); color: var(--warn); } .pill.na { background: var(--surface-2); color: var(--muted); }
 
-.inbox-card { display:flex; align-items:center; gap:12px; width:100%; text-align:left; margin:0 0 12px; background:#f5d98a; color:#2b2200; border:0; }
-.inbox-card .inbox-n { flex:none; min-width:32px; height:32px; border-radius:16px; background:#2b2200; color:#f5d98a; display:flex; align-items:center; justify-content:center; font-weight:700; }
-.inbox-card .chev { margin-left:auto; }
+.btn.inbox-card { display:flex; align-items:center; gap:12px; width:100%; text-align:left; margin:0 0 12px; background:#f5d98a; color:#2b2200; border:0; }
+.btn.inbox-card .inbox-n { flex:none; min-width:32px; height:32px; border-radius:16px; background:#2b2200; color:#f5d98a; display:flex; align-items:center; justify-content:center; font-weight:700; }
+.btn.inbox-card .chev { margin-left:auto; }
 .ib { display:grid; gap:10px; }
 .ib-top { display:flex; flex-wrap:wrap; gap:4px 10px; align-items:baseline; }
 .ib-text { margin:0; white-space:pre-wrap; }
@@ -178,7 +178,7 @@ textarea.inp { resize: vertical; line-height: 1.4; }
   padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
 .ed-bar { display: flex; gap: 8px; padding: 10px 12px; }
 .ed-bar button { flex: 1; border: 0; border-radius: 10px; padding: 11px 6px; font-weight: 600; background: #26323a; color: #fff; }
-.ed-bar .primary { background: #2f8fc0; } .ed-bar .danger { background: #6a1c27; }
+.ed-bar .primary { background: #0a9b8c; } .ed-bar .danger { background: #6a1c27; }
 .ed-hint { color: #b9c6cd; text-align: center; margin: 0 0 6px; font-size: 14px; }
 .ed-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 8px; }
 #ed-canvas { max-width: 100%; max-height: 100%; touch-action: none; border-radius: 4px; }
