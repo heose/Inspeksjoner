@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-01 å2';
+const APP_VERSION = '2026-11-01 å3';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -78,6 +78,8 @@ S.settings.trello = S.settings.trello || {};
 S.settings.hub = S.settings.hub || {};
 S.hubMonths = {};
 try { const o = JSON.parse(localStorage.getItem('insp-hub') || 'null'); if (o && o.months) S.hubMonths = o.months; else if (o && o.ym) S.hubMonths = { [o.ym]: { rows: o.rows || [], at: o.at || 0 } }; } catch (e) { S.hubMonths = {}; }
+S.hubActs = {};
+try { const o = JSON.parse(localStorage.getItem('insp-acts') || 'null'); if (o && o.items) S.hubActs = o.items; } catch (e) { S.hubActs = {}; }
 const saveSettings = () => { try { localStorage.setItem('insp-settings', JSON.stringify(S.settings)); } catch (e) {} };
 try { const c = JSON.parse(localStorage.getItem('insp-content') || 'null'); if (c && c.src) { applyContent(c.src); S.contentAt = c.at; } } catch (e) { console.error('Innhold', e); }
 try { const c = JSON.parse(localStorage.getItem('insp-links') || 'null'); if (c && Array.isArray(c.links)) { S.links = c.links; S.linksAt = c.at; } } catch (e) { console.error('Lenker', e); }
@@ -212,7 +214,7 @@ function covItems(c, ins) {
 }
 const answered = a => a && a.value != null && a.value !== '' && !(Array.isArray(a.value) && !a.value.length);
 const unresolved = a => !(a.actions || []).length || a.actions.some(z => !z.done);
-let anlCache = null;
+let anlCache = null, openCache = null;
 function anlState(a) {
   anlCache ||= {};
   if (anlCache[a.id]) return anlCache[a.id];
@@ -230,7 +232,7 @@ function anlState(a) {
       if (!last) { last = i; lastFlags = flags.filter(x => unresolved(i.answers[x.key])); }
     }
     for (const i of all) if (i.templateId === c.t) for (const [key, ans] of Object.entries(i.answers))
-      for (const act of ans.actions || []) if (!act.done && covMatch(c, key, i)) open.push({ i, key, act });
+      for (const act of ans.actions || []) if (!act.done && covMatch(c, key, i)) open.push(locItem(i, key, act));
     let remote = null; const ck = a.id + '|' + a.cov.indexOf(c);
     for (const r of hubRows()) if (Array.isArray(r.ac) && r.ac.includes(ck) && r.date && (!remote || r.date > remote)) remote = r.date;
     const lastDate = last && (!remote || last.date >= remote) ? last.date : remote;
@@ -239,9 +241,10 @@ function anlState(a) {
   }
   for (const i of all) if (i.anl === a.id) {
     const acts = Object.entries(i.answers).flatMap(([key, ans]) => (ans.actions || []).map(act => ({ key, act })));
-    for (const { key, act } of acts) if (!act.done) open.push({ i, key, act });
+    for (const { key, act } of acts) if (!act.done) open.push(locItem(i, key, act));
     if (i.status === 'complete') hist.push({ i, t: TPL.avvik, n: 1, flags: acts.map(z => ({ it: { label: (z.act.text || 'Avvik').split('\n')[0] } })) });
   }
+  for (const x of openAll()) if (x.rec && x.anl.includes(a.id)) open.push(x);
   hist.sort((x, y) => (y.i.date || '').localeCompare(x.i.date || ''));
   const dated = covs.filter(x => x.lastDate).sort((x, y) => rank[x.du.cls] - rank[y.du.cls] || (x.du.date || '').localeCompare(y.du.date || ''));
   const worst = dated[0], nextDue = worst?.du.date || null;
@@ -296,7 +299,7 @@ let toastTimer;
 function toast(t, ms = 2600) { const el = $('#toast'); el.textContent = t; el.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, ms); }
 
 function render() {
-  anlCache = null;
+  anlCache = null; openCache = null;
   const bar = $('#topbar');
   if (S.view === 'anl' && ANL[S.anl] && S.ready) {
     bar.innerHTML = `<button class="back" data-act="to-site" aria-label="Tilbake til bygget">‹ ${SITES.find(x => x.id === ANL[S.anl].site).short}</button><div class="bar-title">${esc(ANL[S.anl].name)}</div><div class="bar-status"></div>`;
@@ -415,20 +418,27 @@ function renderHome() {
 
 const rank = { bad: 0, warn: 1, blue: 2, ok: 3, na: 4 };
 const PRIO_RANK = { 'Høy': 0, 'Middels': 1, 'Lav': 2 }, PRIO_CLS = { 'Høy': 'hoy', 'Middels': 'mid', 'Lav': 'lav' };
-const actSort = (x, y) => (PRIO_RANK[x.act.prio] ?? 3) - (PRIO_RANK[y.act.prio] ?? 3) || (x.act.due || '9').localeCompare(y.act.due || '9');
-function actLine({ i, key, act }, withSite) {
-  const t = TPL[i.templateId], late = act.due && act.due < todayISO(), pr = act.prio || 'Lav';
-  const sh = withSite ? SITES.find(x => x.id === actSite(i, key))?.short : '';
-  return `<div class="act-line prio-${PRIO_CLS[pr] || 'lav'}"><input type="checkbox" id="hd-${act.id}" data-hdone="${i.id}|${esc(key)}|${act.id}" aria-label="Merk som utført">
-      <button class="row-main" data-act="open" data-id="${i.id}" data-focus="${esc(key)}">
-      <span class="rc-title">${esc(act.text || '(uten beskrivelse)')}</span>
-      <span class="rc-sub"><b class="prio-tag">${esc(pr)}</b> · ${sh ? esc(sh) + ' · ' : ''}${esc(t.name)} · ${fmt(i.date)}${act.due ? ` · <span class="${late ? 't-bad' : ''}">Frist ${fmt(act.due)}</span>` : ''}</span></button></div>`;
+const actSort = (x, y) => (PRIO_RANK[x.prio] ?? 3) - (PRIO_RANK[y.prio] ?? 3) || (x.due || '9').localeCompare(y.due || '9');
+/* En handling er enten lokal (ligger i en inspeksjon på denne telefonen) eller delt (kommer fra en annen telefon via Hub). */
+const locItem = (i, key, act) => ({ id: act.id, text: act.text || '', prio: act.prio || 'Lav', due: act.due || '', tplName: TPL[i.templateId]?.name || '', date: i.date, siteId: actSite(i, key) || insSite(i) || '', by: i.by || '', anl: [], local: { i, key, act }, rec: null });
+const remItem = r => ({ id: r.id, text: r.text || '', prio: r.prio || 'Lav', due: r.due || '', tplName: r.tpl || '', date: r.date, siteId: r.siteId || '', by: r.by || '', anl: r.anl || [], local: null, rec: r });
+function openAll() {
+  if (openCache) return openCache;
+  const out = [], ids = new Set();
+  for (const i of Object.values(S.ins)) if (TPL[i.templateId]) for (const [key, a] of Object.entries(i.answers)) for (const act of a.actions || []) { ids.add(act.id); if (!act.done) out.push(locItem(i, key, act)); }
+  for (const r of Object.values(S.hubActs || {})) if (!r.done && !ids.has(r.id) && (r.text || '').trim()) out.push(remItem(r));
+  return (openCache = out.sort(actSort));
 }
-function allOpen() {
-  const out = [];
-  for (const i of Object.values(S.ins)) if (TPL[i.templateId]) for (const [key, a] of Object.entries(i.answers)) for (const act of a.actions || []) if (!act.done) out.push({ i, key, act });
-  return out.sort(actSort);
+function actLine(x, withSite) {
+  const late = x.due && x.due < todayISO(), pr = x.prio, sh = withSite ? SITES.find(z => z.id === x.siteId)?.short : '';
+  const chk = x.local ? `data-hdone="${x.local.i.id}|${esc(x.local.key)}|${esc(x.id)}"` : `data-rdone="${esc(x.id)}"`;
+  const go = x.local ? `data-act="open" data-id="${x.local.i.id}" data-focus="${esc(x.local.key)}"` : `data-act="recent-pdf" data-id="${esc(x.rec.iid)}"`;
+  return `<div class="act-line prio-${PRIO_CLS[pr] || 'lav'}"><input type="checkbox" id="hd-${esc(x.id)}" ${chk} aria-label="Merk som utført">
+      <button class="row-main" ${go}>
+      <span class="rc-title">${esc(x.text || '(uten beskrivelse)')}</span>
+      <span class="rc-sub"><b class="prio-tag">${esc(pr)}</b> · ${sh ? esc(sh) + ' · ' : ''}${esc(x.tplName)} · ${fmt(x.date)}${x.local ? '' : x.by ? ' · ' + esc(x.by) : ''}${x.due ? ` · <span class="${late ? 't-bad' : ''}">Frist ${fmt(x.due)}</span>` : ''}</span></button></div>`;
 }
+const allOpen = openAll;
 function lastOf(tid, done) {
   const l = done.find(i => i.templateId === tid); let d = l ? l.date : null;
   for (const r of hubRows()) if (r.tpl === tid && r.date && (!d || r.date > d)) d = r.date;
@@ -436,11 +446,7 @@ function lastOf(tid, done) {
 }
 const doneList = () => Object.values(S.ins).filter(i => i.status === 'complete').sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.updatedAt - a.updatedAt);
 const actSite = (i, key) => { const tl = listKey(i, key); return SITES.find(x => x.tl === tl)?.id; };
-function siteOpen(site) {
-  const out = [];
-  for (const i of Object.values(S.ins)) if (TPL[i.templateId]) for (const [key, a] of Object.entries(i.answers)) for (const act of a.actions || []) if (!act.done && actSite(i, key) === site.id) out.push({ i, key, act });
-  return out.sort((x, y) => (x.act.due || '9').localeCompare(y.act.due || '9'));
-}
+const siteOpen = site => openAll().filter(x => x.siteId === site.id);
 function siteState(site) {
   const sts = ANLEGG.filter(a => a.site === site.id).map(anlState);
   const nbad = sts.filter(x => x.cls === 'bad').length, nwarn = sts.filter(x => x.cls === 'warn').length, nblue = sts.filter(x => x.cls === 'blue').length, nna = sts.filter(x => x.cls === 'na').length;
@@ -476,7 +482,7 @@ function renderSite() {
   h += recentHtml(site.id);
   const open = siteOpen(site);
   h += `<section><h2 class="h2">Åpne handlinger <span class="count">${open.length}</span></h2>${trelloHomeLine()}`;
-  h += open.length ? `<div class="list">${open.sort(actSort).map(x => actLine(x)).join('')}</div>` : '<p class="empty">Ingen åpne handlinger.</p>';
+  h += open.length ? `<div class="list">${open.map(x => actLine(x)).join('')}</div>` : '<p class="empty">Ingen åpne handlinger.</p>';
   h += '</section>';
   const mine = done.filter(i => site.tpls.includes(i.templateId) || (i.templateId === 'avvik' && (i.siteId || ANL[i.anl]?.site) === site.id));
   const hist = S.showAllHist ? mine : mine.slice(0, 8);
@@ -506,7 +512,7 @@ function renderAnl() {
       ${x.draft ? `<button class="btn" data-act="open" data-id="${x.draft.id}">Fortsett påbegynt (${fmt(x.draft.date)})</button>` : `<button class="btn primary" data-act="new" data-tpl="${x.t.id}">Start kontroll</button>`}</div>`;
   }).join('')}</div></section>`;
   h += `<section><h2 class="h2">Åpne handlinger <span class="count">${st.open.length}</span></h2>`;
-  h += st.open.length ? `<div class="list">${st.open.sort(actSort).map(x => actLine(x)).join('')}</div>` : '<p class="empty">Ingen åpne handlinger.</p>';
+  h += st.open.length ? `<div class="list">${st.open.slice().sort(actSort).map(x => actLine(x)).join('')}</div>` : '<p class="empty">Ingen åpne handlinger.</p>';
   h += '</section>';
   h += `<section><h2 class="h2">Historikk</h2>`;
   h += st.hist.length ? `<div class="list">${st.hist.slice(0, 30).map(({ i, t, n, flags }) => `<div class="row-card"><button class="row-main" data-act="open" data-id="${i.id}">
@@ -776,13 +782,14 @@ document.addEventListener('click', async e => {
 });
 async function deleteIns(id) {
   const victim = S.ins[id]; if (!victim) return;
+  hubCloseActs(victim);
   clearTimeout(timers[id]); delete timers[id];
   delete S.ins[id]; if (S.cur === id) S.cur = null;
   try { await chains[id]; } catch (e) {}
   delete chains[id];
   await DB.del('inspections', id);
   for (const a of Object.values(victim.answers || {})) for (const p of a.photos || []) DB.del('photos', p);
-  anlCache = null;
+  anlCache = null; openCache = null;
 }
 function arm(b, label) {
   const old = b.textContent; b.dataset.armed = '1'; b.textContent = label; b.classList.add('armed');
@@ -816,17 +823,18 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('change', e => {
   const el = e.target; const ins = cur();
+  if (el.dataset.rdone) { toggleRemoteAct(el.dataset.rdone, el.checked); return; }
   if (el.dataset.hdone) {
     const [iid, key, id] = el.dataset.hdone.split('|'); const i = S.ins[iid];
     const act = (i?.answers[key]?.actions || []).find(x => x.id === id);
-    if (act) { act.done = el.checked; touch(i); toast('Handlingen er merket som utført'); setTimeout(render, 350); setTimeout(syncTrello, 1200); }
+    if (act) { act.done = el.checked; act.upd = Date.now(); act.doneBy = el.checked ? (S.settings.by || '') : ''; touch(i); toast('Handlingen er merket som utført'); setTimeout(render, 350); setTimeout(syncTrello, 1200); setTimeout(hubSync, 2000); }
     return;
   }
   if (!ins) return;
   if (el.dataset.actf && el.type === 'checkbox') {
     const [key, id] = el.dataset.actf.split('|');
     const act = (ins.answers[key]?.actions || []).find(x => x.id === id);
-    if (act) { act.done = el.checked; touch(ins); render(); }
+    if (act) { act.done = el.checked; act.upd = Date.now(); act.doneBy = el.checked ? (S.settings.by || '') : ''; touch(ins); render(); }
   } else if (el.dataset.rerender || el.dataset.avf === 'anl') render();
 });
 
@@ -1305,7 +1313,7 @@ async function syncTrello(manual) {
         for (const { ins, act } of tracked) {
           let c = byId[act.trello.id];
           if (!c) { try { c = await tfetch('GET', `cards/${act.trello.id}`, { fields: 'closed,dueComplete,idList' }); } catch (e) { if (e.status !== 404) continue; c = null; } }
-          if (!c || c.closed || c.dueComplete || c.idList === TRELLO.done) { act.done = true; act.doneAt = todayISO(); act.closedIn = !c ? 'Trello (kortet er slettet)' : c.closed ? 'Trello (arkivert)' : c.idList === TRELLO.done ? 'Trello (Ferdig)' : 'Trello'; act.trello.done = true; closed++; await saveIns(ins); }
+          if (!c || c.closed || c.dueComplete || c.idList === TRELLO.done) { act.done = true; act.upd = Date.now(); act.doneBy = 'Trello'; act.doneAt = todayISO(); act.closedIn = !c ? 'Trello (kortet er slettet)' : c.closed ? 'Trello (arkivert)' : c.idList === TRELLO.done ? 'Trello (Ferdig)' : 'Trello'; act.trello.done = true; closed++; await saveIns(ins); }
         }
       }
     }
@@ -1343,7 +1351,62 @@ async function hubFetch(method, path, body, raw) {
   return r.json();
 }
 const insSite = i => i.siteId || ANL[i.anl]?.site || SITES.find(s => s.tpls.includes(i.templateId))?.id || null;
-const hubRec = i => ({ id: i.id, tpl: i.templateId, name: TPL[i.templateId]?.name || '', siteId: insSite(i), date: i.date, by: i.by || '', at: i.completedAt || i.updatedAt, flags: stats(i).flags || 0 });
+const hubRec = i => ({ id: i.id, tpl: i.templateId, name: TPL[i.templateId]?.name || '', siteId: insSite(i), date: i.date, by: i.by || '', at: i.completedAt || i.updatedAt, flags: stats(i).flags || 0, nact: stats(i).actions || 0 });
+/* ---------- Delte handlinger via Hub ----------
+   Bare handlinger fra fullførte inspeksjoner deles. Kladder er lokale. «Utført» avgjøres av siste endring (upd). */
+const persistActs = () => { try { localStorage.setItem('insp-acts', JSON.stringify({ items: S.hubActs })); } catch (e) {} };
+const actAnl = (ins, key) => [...new Set(ANLEGG.filter(a => a.cov.some(c => c.t === ins.templateId && covMatch(c, key, ins))).map(a => a.id).concat(ins.anl ? [ins.anl] : []))];
+const actRec = (ins, key, act) => ({ id: act.id, iid: ins.id, key, text: act.text || '', due: act.due || '', who: act.who || '', prio: act.prio || 'Lav', done: !!act.done, doneAt: act.doneAt || '', doneBy: act.doneBy || '', closedIn: act.closedIn || '',
+  tr: act.trello?.id ? { id: act.trello.id, url: act.trello.url || '' } : null, tpl: TPL[ins.templateId]?.name || '', tplId: ins.templateId, siteId: actSite(ins, key) || insSite(ins) || '', date: ins.date || '', by: ins.by || '', anl: actAnl(ins, key), upd: act.upd || 0 });
+async function pushRemoteEdits() {
+  for (const r of Object.values(S.hubActs)) if (r.dirty) { const { dirty, ...rec } = r; await hubFetch('PUT', '/act/' + r.id, rec); delete r.dirty; persistActs(); }
+}
+async function pullActs() {
+  const r = await hubFetch('GET', '/actions'), next = {};
+  for (const rec of r.items || []) { const mine = S.hubActs[rec.id]; next[rec.id] = mine && mine.dirty ? mine : rec; }
+  S.hubActs = next; persistActs(); openCache = null;
+  for (const rec of Object.values(next)) {
+    const ins = S.ins[rec.iid], act = ins && ins.status === 'complete' ? ins.answers[rec.key]?.actions?.find(z => z.id === rec.id) : null;
+    if (!act || !((rec.upd || 0) > (act.upd || 0)) || !!rec.done === !!act.done) continue;
+    act.done = !!rec.done; act.doneAt = rec.doneAt || ''; act.doneBy = rec.doneBy || ''; act.upd = rec.upd;
+    if (rec.closedIn) act.closedIn = rec.closedIn; else delete act.closedIn;
+    act.hubSig = JSON.stringify(actRec(ins, rec.key, act)); await saveIns(ins);
+  }
+}
+async function pushActs() {
+  for (const ins of Object.values(S.ins)) {
+    if (ins.status !== 'complete' || !TPL[ins.templateId]) continue; let dirty = false;
+    for (const [key, a] of Object.entries(ins.answers)) for (const act of a.actions || []) {
+      if (!(act.text || '').trim()) continue;
+      const rec = actRec(ins, key, act), sig = JSON.stringify(rec);
+      if (act.hubSig === sig) continue;
+      await hubFetch('PUT', '/act/' + act.id, rec); act.hubSig = sig; dirty = true; S.hubActs[act.id] = rec;
+    }
+    if (dirty) await saveIns(ins);
+  }
+  persistActs(); openCache = null;
+}
+async function reapActs() {
+  for (const r of Object.values(S.hubActs)) {
+    const ins = S.ins[r.iid]; if (r.done || !ins || ins.status !== 'complete') continue;
+    if ((ins.answers[r.key]?.actions || []).some(z => z.id === r.id)) continue;
+    const rec = { ...r, done: true, closedIn: 'Fjernet', doneBy: S.settings.by || '', upd: Date.now() }; delete rec.dirty;
+    await hubFetch('PUT', '/act/' + r.id, rec); S.hubActs[r.id] = rec;
+  }
+  persistActs(); openCache = null;
+}
+function hubCloseActs(ins) {
+  if (!ins || ins.status !== 'complete' || !hubCfg() || !navigator.onLine) return;
+  for (const [key, a] of Object.entries(ins.answers || {})) for (const act of a.actions || [])
+    if (act.hubSig && !act.done) hubFetch('PUT', '/act/' + act.id, { ...actRec(ins, key, act), done: true, closedIn: 'Inspeksjonen er slettet', doneBy: S.settings.by || '', upd: Date.now() }).catch(() => {});
+}
+async function toggleRemoteAct(id, checked) {
+  const r = S.hubActs[id]; if (!r) return;
+  r.done = checked; r.doneBy = checked ? (S.settings.by || '') : ''; r.doneAt = checked ? todayISO() : ''; r.upd = Date.now(); r.dirty = true; openCache = null; persistActs();
+  toast(checked ? 'Handlingen er merket som utført' : 'Handlingen er åpnet igjen'); setTimeout(render, 350);
+  try { if (r.tr?.id && r.due && trelloCfg() && navigator.onLine) await tfetch('PUT', `cards/${r.tr.id}`, { dueComplete: checked ? 'true' : 'false' }); } catch (e) {}
+  setTimeout(hubSync, 800);
+}
 /* Hvilke anlegg/kontroller en inspeksjon dekker. Sendes til Hub, slik at alle telefoner ser hva som er utført. */
 function covKeys(i) {
   const out = [];
@@ -1376,6 +1439,7 @@ async function hubSync(manual) {
     const got = await Promise.all(need.map(async y => { try { return [y, await hubFetch('GET', '/month/' + y)]; } catch (e) { if (y === cur || e.status === 401) throw e; return null; } }));
     try { await loadLinks(); } catch (e) { if (e.status === 401) throw e; }
     try { S.inbox = (await hubFetch('GET', '/inbox')).items || []; } catch (e) { if (e.status === 401) throw e; S.inbox = S.inbox || null; }
+    try { await pushRemoteEdits(); await pullActs(); await pushActs(); await reapActs(); } catch (e) { if (e.status === 401) throw e; console.warn('Delte handlinger', e); }
     for (const g of got) if (g) S.hubMonths[g[0]] = { rows: g[1].rows || [], at: Date.now() };
     for (const y of Object.keys(S.hubMonths)) if (!yms.includes(y)) delete S.hubMonths[y];
     try { localStorage.setItem('insp-hub', JSON.stringify({ months: S.hubMonths })); } catch (e) {}

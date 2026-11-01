@@ -77,3 +77,12 @@ Egen side i Argus («Del lenker og skjema» på forsiden). Lenker til deling få
 - Første liste ligger i innholdsfilen (`LINKS` i `content.js`, utenfor repoet). Last den opp som vanlig.
 - Administrator kan endre listen direkte i appen («Rediger lenker» → Lagre). Da lagres den i Hub (`/links`), og alle får den ved neste synk. Lenker må starte med `https://`.
 - Lim inn nyeste `hub/worker.js` og Deploy.
+
+
+## Delte handlinger og varsel ved avvik
+
+- **Delte handlinger:** Åpne handlinger fra fullførte inspeksjoner deles mellom alle telefoner via Hub (`PUT /act/:id`, `GET /actions`). Kladder deles ikke. Når noen krysser av en handling, ser alle det ved neste synk. Utførte handlinger ligger i Hub i 30 dager.
+- **Push ved avvik:** Når en inspeksjon med avvik, eller en avviksmelding, kommer inn i Hub første gang, sendes ett Pushover-varsel, uansett hvem som melder. Oppdateringer av gamle poster og poster eldre enn to dager varsler ikke. Bruker `PUSHOVER_TOKEN` og `PUSHOVER_USER`.
+- Vil flere ha varselet, lag en gruppe i Pushover og legg gruppenøkkelen i `PUSHOVER_USER`.
+- Gratisgrensen for KV er 1 000 skrivinger og 1 000 list-kall per dag. Dette bruker ca. 1 skriving per handling og ett list-kall per synk.
+- Lim inn hele `hub/worker.js` på nytt under Edit code og Deploy. Appen virker også mot gammel Hub, men uten delte handlinger.

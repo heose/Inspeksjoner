@@ -55,6 +55,18 @@ async function varsle(env, o = {}) {
   } catch (e) { return false; }
 }
 
+const cut = (v, n) => String(v == null ? '' : v).slice(0, n);
+function cleanAct(b, id) {
+  return {
+    id, iid: cut(b.iid, 64), key: cut(b.key, 120), text: cut(b.text, 600), due: /^\d{4}-\d{2}-\d{2}$/.test(b.due || '') ? b.due : '',
+    who: cut(b.who, 60), prio: ['Lav', 'Middels', 'Høy'].includes(b.prio) ? b.prio : 'Lav',
+    done: !!b.done, doneAt: cut(b.doneAt, 10), doneBy: cut(b.doneBy, 60), closedIn: cut(b.closedIn, 80),
+    tr: b.tr && b.tr.id ? { id: cut(b.tr.id, 40), url: cut(b.tr.url, 200) } : null,
+    tpl: cut(b.tpl, 100), tplId: cut(b.tplId, 40), siteId: cut(b.siteId, 20), date: cut(b.date, 10), by: cut(b.by, 60),
+    anl: Array.isArray(b.anl) ? b.anl.slice(0, 20).map(x => cut(x, 40)) : [], upd: Number(b.upd) || 0,
+  };
+}
+
 // ---------- Snøvarsel (Cron Trigger, f.eks. hver 3. time) ----------
 // Henter prognosen fra MET (Locationforecast 2.0). Ved snø de neste 24 timene sendes push (Pushover)
 // og det lages et Trello-kort med sjekkliste på Olsrød Park-listen. Maks ett varsel per 18 timer.
@@ -323,8 +335,41 @@ export default {
         const ym = String(rec.date || '').slice(0, 7);
         if (!/^\d{4}-\d{2}$/.test(ym)) return json(req, { error: 'Ugyldig dato' }, 400);
         rec.id = p[1]; rec.hubAt = Date.now(); rec.user = user.name;
-        await env.ARGUS.put(`log:${ym}:${p[1]}`, JSON.stringify(rec));
+        const lk = `log:${ym}:${p[1]}`, fantes = await env.ARGUS.get(lk);
+        await env.ARGUS.put(lk, JSON.stringify(rec));
+        // Push når et avvik registreres første gang, uavhengig av hvem som melder. Gamle poster og oppdateringer varsler ikke.
+        const nytt = !fantes && (Number(rec.flags) > 0 || rec.tpl === 'avvik') && String(rec.date || '') >= new Date(Date.now() - 2 * 864e5).toISOString().slice(0, 10);
+        if (nytt) {
+          const t = (v, n) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, n);
+          const n = Number(rec.flags) || 0, na = Number(rec.nact) || 0;
+          const hva = rec.tpl === 'avvik' ? 'Avvik meldt' : `${n} avvik i ${t(rec.name, 60)}`;
+          await varsle(env, { title: 'Argus – avvik', message: `${hva}${rec.siteId ? ' · ' + t(rec.siteId, 10).toUpperCase() : ''}${na ? ` · ${na} ${na === 1 ? 'handling' : 'handlinger'}` : ''}${rec.by ? ' · ' + t(rec.by, 40) : ''}` });
+        }
         return json(req, { ok: true });
+      }
+
+      // PUT /act/:id  –  delt handling fra en fullført inspeksjon. Senest endrede «utført»-status (upd) vinner.
+      // GET /actions  –  alle delte handlinger (åpne, og utførte siste 30 dager)
+      if (req.method === 'PUT' && p[0] === 'act' && p[1] && /^[\w-]{3,64}$/.test(p[1])) {
+        let b; try { b = await req.json(); } catch (e) { return json(req, { error: 'Ugyldig JSON' }, 400); }
+        const fresh = cleanAct(b, p[1]), key = `act:${p[1]}`, curS = await env.ARGUS.get(key);
+        if (curS) {
+          const cur = JSON.parse(curS);
+          if ((cur.upd || 0) > fresh.upd) Object.assign(fresh, { done: cur.done, doneAt: cur.doneAt, doneBy: cur.doneBy, closedIn: cur.closedIn, upd: cur.upd });
+        }
+        const next = JSON.stringify(fresh);
+        if (next !== curS) await env.ARGUS.put(key, next, fresh.done ? { expirationTtl: 30 * 86400 } : undefined);
+        return json(req, { ok: true });
+      }
+      if (req.method === 'GET' && p[0] === 'actions' && !p[1]) {
+        const items = []; let cursor;
+        do {
+          const l = await env.ARGUS.list({ prefix: 'act:', cursor });
+          const vals = await Promise.all(l.keys.map(k => env.ARGUS.get(k.name)));
+          for (const x of vals) if (x) items.push(JSON.parse(x));
+          cursor = l.list_complete ? null : l.cursor;
+        } while (cursor && items.length < 1000);
+        return json(req, { items });
       }
 
       // GET /month/YYYY-MM
