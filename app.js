@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-01 ø';
+const APP_VERSION = '2026-11-01 å';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -173,13 +173,30 @@ function prevValue(ins, key) {
   return null;
 }
 const freqLabel = t => t.days === 7 ? 'Ukentlig' : t.months === 1 ? 'Månedlig' : t.months === 3 ? 'Kvartalsvis' : t.months === 6 ? 'Halvårlig' : 'Hver ' + t.months + '. mnd';
+/* Kalenderperioder: måned, kvartal og halvår følger kalenderen. Blå ved start, gul fra 20., rød fra 29. (eller siste dag i kort måned) i utløpsmåneden. */
+const PERIOD_THIS = { 1: 'denne måneden', 3: 'dette kvartalet', 6: 'dette halvåret' };
+const monthIdx = s => { const [y, m] = s.split('-').map(Number); return y * 12 + m - 1; };
+const periodOf = (s, m) => Math.floor(monthIdx(s) / m);
+const periodStart = (p, m) => { const mi = p * m; return `${String(Math.floor(mi / 12)).padStart(4, '0')}-${String(mi % 12 + 1).padStart(2, '0')}-01`; };
+const periodEnd = (p, m) => addDays(periodStart(p + 1, m), -1);
 function dueInfo(t, last) {
   if (!last) return { cls: 'na', text: 'Ikke utført i appen ennå' };
-  const next = t.days ? addDays(last.date, t.days) : addMonths(last.date, t.months);
-  const d = daysBetween(todayISO(), next);
-  if (d < 0) return { cls: 'bad', text: 'Forfalt ' + fmt(next) };
-  if (d <= (t.days ? 2 : 7)) return { cls: 'warn', text: 'Forfaller ' + fmt(next) };
-  return { cls: 'ok', text: 'Neste ' + fmt(next) };
+  if (t.days || !PERIOD_THIS[t.months]) {
+    const next = t.days ? addDays(last.date, t.days) : addMonths(last.date, t.months);
+    const d = daysBetween(todayISO(), next);
+    if (d < 0) return { cls: 'bad', text: 'Forfalt ' + fmt(next), date: next };
+    if (d <= (t.days ? 2 : 7)) return { cls: 'warn', text: 'Forfaller ' + fmt(next), date: next };
+    return { cls: 'ok', text: 'Neste ' + fmt(next), date: next };
+  }
+  const m = t.months, today = todayISO(), pNow = periodOf(today, m), pLast = periodOf(last.date, m);
+  if (pLast >= pNow) { const nx = periodStart(pNow + 1, m); return { cls: 'ok', text: 'Neste fra ' + fmt(nx), date: nx }; }
+  if (pLast < pNow - 1) { const e = periodEnd(pLast + 1, m); return { cls: 'bad', text: 'Forfalt ' + fmt(e), date: e }; }
+  const end = periodEnd(pNow, m);
+  if (monthIdx(today) !== (pNow + 1) * m - 1) return { cls: 'blue', text: 'Frist ' + fmt(end), date: end };
+  const day = Number(today.slice(8, 10));
+  if (day >= 29 || today === end) return { cls: 'bad', text: 'Forfaller ' + fmt(end), date: end };
+  if (day >= 20) return { cls: 'warn', text: 'Forfaller ' + fmt(end), date: end };
+  return { cls: 'blue', text: 'Frist ' + fmt(end), date: end };
 }
 function covMatch(c, key, ins) {
   const dot = key.indexOf('.'), p = key.slice(0, dot), id = key.slice(dot + 1), sec = p.split('#')[0];
@@ -215,7 +232,7 @@ function anlState(a) {
     for (const i of all) if (i.templateId === c.t) for (const [key, ans] of Object.entries(i.answers))
       for (const act of ans.actions || []) if (!act.done && covMatch(c, key, i)) open.push({ i, key, act });
     const next = last ? (t.days ? addDays(last.date, t.days) : addMonths(last.date, t.months)) : null;
-    covs.push({ c, t, last, flags: lastFlags, next, d: next ? daysBetween(todayISO(), next) : null, draft: all.find(i => i.templateId === c.t && i.status !== 'complete') });
+    covs.push({ c, t, last, flags: lastFlags, next, du: dueInfo(t, last), d: next ? daysBetween(todayISO(), next) : null, draft: all.find(i => i.templateId === c.t && i.status !== 'complete') });
   }
   for (const i of all) if (i.anl === a.id) {
     const acts = Object.entries(i.answers).flatMap(([key, ans]) => (ans.actions || []).map(act => ({ key, act })));
@@ -223,18 +240,14 @@ function anlState(a) {
     if (i.status === 'complete') hist.push({ i, t: TPL.avvik, n: 1, flags: acts.map(z => ({ it: { label: (z.act.text || 'Avvik').split('\n')[0] } })) });
   }
   hist.sort((x, y) => (y.i.date || '').localeCompare(x.i.date || ''));
-  const dated = covs.filter(x => x.next).sort((x, y) => x.next.localeCompare(y.next));
-  const nextDue = dated[0]?.next || null;
-  const overdue = dated.find(x => x.d < 0);
-  const soon = dated.find(x => x.d <= (x.t.days ? 2 : 7));
+  const dated = covs.filter(x => x.last).sort((x, y) => rank[x.du.cls] - rank[y.du.cls] || (x.du.date || '').localeCompare(y.du.date || ''));
+  const worst = dated[0], nextDue = worst?.du.date || null;
   const nflag = covs.reduce((n, x) => n + x.flags.length, 0);
   let cls, text;
   if (open.length || nflag) { cls = 'bad'; text = [open.length ? open.length + (open.length === 1 ? ' åpen handling' : ' åpne handlinger') : '', nflag ? nflag + ' avvik' : ''].filter(Boolean).join(' · '); }
-  else if (!dated.length) { cls = 'na'; text = 'Ikke kontrollert i Argus ennå'; }
-  else if (overdue) { cls = 'bad'; text = 'Forfalt ' + fmt(overdue.next); }
-  else if (soon) { cls = 'warn'; text = 'Forfaller ' + fmt(soon.next); }
-  else { cls = 'ok'; text = 'Neste ' + fmt(nextDue); }
-  if (cls === 'bad' && overdue && (open.length || nflag)) text += ' · forfalt';
+  else if (!worst) { cls = 'na'; text = 'Ikke kontrollert i Argus ennå'; }
+  else { cls = worst.du.cls; text = worst.du.text; }
+  if (cls === 'bad' && worst && worst.du.cls === 'bad' && (open.length || nflag)) text += ' · forfalt';
   return (anlCache[a.id] = { covs, hist, open, nextDue, cls, text });
 }
 const A = (ins, key) => (ins.answers[key] ||= {});
@@ -394,7 +407,7 @@ function renderHome() {
   return h;
 }
 
-const rank = { bad: 0, warn: 1, ok: 2, na: 3 };
+const rank = { bad: 0, warn: 1, blue: 2, ok: 3, na: 4 };
 const doneList = () => Object.values(S.ins).filter(i => i.status === 'complete').sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.updatedAt - a.updatedAt);
 const actSite = (i, key) => { const tl = listKey(i, key); return SITES.find(x => x.tl === tl)?.id; };
 function siteOpen(site) {
@@ -404,11 +417,11 @@ function siteOpen(site) {
 }
 function siteState(site) {
   const sts = ANLEGG.filter(a => a.site === site.id).map(anlState);
-  const nbad = sts.filter(x => x.cls === 'bad').length, nwarn = sts.filter(x => x.cls === 'warn').length, nna = sts.filter(x => x.cls === 'na').length;
+  const nbad = sts.filter(x => x.cls === 'bad').length, nwarn = sts.filter(x => x.cls === 'warn').length, nblue = sts.filter(x => x.cls === 'blue').length, nna = sts.filter(x => x.cls === 'na').length;
   const nopen = siteOpen(site).length;
-  const cls = nbad ? 'bad' : nwarn ? 'warn' : nna === sts.length ? 'na' : 'ok';
+  const cls = nbad ? 'bad' : nwarn ? 'warn' : nna === sts.length ? 'na' : nblue ? 'blue' : 'ok';
   const text = nna === sts.length && !nopen ? 'Ingen kontroller i Argus ennå'
-    : [nbad ? `${nbad} anlegg med avvik eller forfalt` : '', nwarn ? `${nwarn} forfaller snart` : '', nopen ? `${nopen} ${nopen === 1 ? 'åpen handling' : 'åpne handlinger'}` : ''].filter(Boolean).join(' · ') || `Alle ${sts.length} anlegg i orden`;
+    : [nbad ? `${nbad} anlegg med avvik eller forfalt` : '', nwarn ? `${nwarn} forfaller snart` : '', nblue ? `${nblue} skal kontrolleres` : '', nopen ? `${nopen} ${nopen === 1 ? 'åpen handling' : 'åpne handlinger'}` : ''].filter(Boolean).join(' · ') || `Alle ${sts.length} anlegg i orden`;
   const done = doneList(); const ds = site.tpls.map(id => ({ t: TPL[id], d: dueInfo(TPL[id], done.find(i => i.templateId === id)) }));
   const late = ds.filter(x => x.d.cls === 'bad').length, never = ds.filter(x => x.d.cls === 'na').length;
   const rounds = `${site.tpls.length} ${site.tpls.length === 1 ? 'runde' : 'runder'}` + (late ? ` · ${late} forfalt` : '') + (never ? ` · ${never} ikke startet` : '');
@@ -430,9 +443,9 @@ function renderSite() {
   const list = ANLEGG.filter(a => a.site === site.id).map(a => ({ a, st: anlState(a) })).sort((x, y) => rank[x.st.cls] - rank[y.st.cls]);
   let h = `<button class="btn avvik-big" data-act="avvik-new" data-site="${site.id}">Meld avvik i ${esc(site.short)}</button>`;
   h += `<section><h2 class="h2">Inspeksjoner</h2><div class="tpl-list">${site.tpls.map(id => tplBtn(TPL[id])).join('')}</div></section>`;
-  { const nb = list.filter(x => x.st.cls === 'bad').length, nw = list.filter(x => x.st.cls === 'warn').length, open = !!S.anlOpen;
+  { const nb = list.filter(x => x.st.cls === 'bad').length, nw = list.filter(x => x.st.cls === 'warn').length, nbl = list.filter(x => x.st.cls === 'blue').length, open = !!S.anlOpen;
     h += `<section><button class="fold" data-act="anl-toggle" aria-expanded="${open}" aria-controls="anl-list"><span class="fold-t">Anlegg <span class="count">${list.length}</span></span>
-      <span class="fold-sum">${!open && nb ? `<span class="dot bad" aria-hidden="true"></span>${nb} <span class="sr">forfalt</span>` : ''}${!open && nw ? `<span class="dot warn" aria-hidden="true"></span>${nw} <span class="sr">snart</span>` : ''}</span><span class="chev" aria-hidden="true">›</span></button>
+      <span class="fold-sum">${!open && nb ? `<span class="dot bad" aria-hidden="true"></span>${nb} <span class="sr">forfalt</span>` : ''}${!open && nw ? `<span class="dot warn" aria-hidden="true"></span>${nw} <span class="sr">snart</span>` : ''}${!open && nbl ? `<span class="dot blue" aria-hidden="true"></span>${nbl} <span class="sr">skal kontrolleres</span>` : ''}</span><span class="chev" aria-hidden="true">›</span></button>
       ${open ? `<div class="list" id="anl-list">${list.map(x => anlBtn(x.a, x.st)).join('')}</div>` : ''}</section>`; }
   h += recentHtml(site.id);
   const open = siteOpen(site);
@@ -607,8 +620,13 @@ function renderSheet() {
   if (!S.ready_file) { el.hidden = true; el.innerHTML = ''; return; }
   el.hidden = false;
   el.innerHTML = `<div class="sheet-card" role="dialog" aria-label="Fil klar"><p class="sheet-title">${esc(S.ready_file.title)}</p><p class="muted small">${esc(S.ready_file.file.name)}</p>
-    <button class="btn primary big" data-act="share-file">Del eller lagre</button>
+    ${S.ready_file.canOpen ? '<button class="btn primary big" data-act="open-file">Åpne PDF</button><button class="btn big" data-act="share-file">Del eller lagre</button>' : '<button class="btn primary big" data-act="share-file">Del eller lagre</button>'}
     <button class="btn" data-act="close-sheet">Lukk</button></div>`;
+}
+function openFile() {
+  const url = URL.createObjectURL(S.ready_file.file);
+  if (!window.open(url, '_blank')) { toast('Nettleseren blokkerte visningen. Bruk Del eller lagre.', 4500); URL.revokeObjectURL(url); return; }
+  setTimeout(() => URL.revokeObjectURL(url), 180000);
 }
 async function shareFile() {
   const { file } = S.ready_file;
@@ -702,6 +720,8 @@ document.addEventListener('click', async e => {
     case 'finish-force': await finish(ins); break;
     case 'finish-cancel': S.confirmFinish = false; render(); break;
     case 'pdf': await makePdf(S.ins[b.dataset.id]); break;
+    case 'recent-pdf': await openRecentPdf(b.dataset.id); break;
+    case 'open-file': openFile(); break;
     case 'share-file': shareFile(); break;
     case 'close-sheet': S.ready_file = null; renderSheet(); break;
     case 'tr-token': {
@@ -892,6 +912,7 @@ async function finish(ins) {
   syncTrello(); hubSync();
   await makePdf(ins);
 }
+const pdfName = ins => `${TPL[ins.templateId].name} ${ins.site.split(/[–,-]/)[0].trim()} ${fmt(ins.date).replace(/\./g, '-')}.pdf`.replace(/[\\/:*?"<>|]/g, '');
 async function makePdf(ins) {
   if (!ins || S.busy) return;
   S.busy = true; if (S.view === 'ins') render(); else toast('Lager PDF…');
@@ -899,7 +920,7 @@ async function makePdf(ins) {
     await flushAll();
     const blob = await buildReport(ins);
     const t = TPL[ins.templateId];
-    const name = `${t.name} ${ins.site.split(/[–,-]/)[0].trim()} ${fmt(ins.date).replace(/\./g, '-')}.pdf`.replace(/[\\/:*?"<>|]/g, '');
+    const name = pdfName(ins);
     S.ready_file = { file: new File([blob], name, { type: 'application/pdf' }), title: 'PDF-rapporten er klar' };
     if (hubCfg() && navigator.onLine) hubFetch('PUT', `/pdf/${ins.id}?name=${encodeURIComponent(name)}`, blob, true).then(() => { ins.hubPdf = true; return saveIns(ins); }).catch(e => console.warn('Hub PDF', e));
   } catch (e) { toast('Kunne ikke lage PDF: ' + (e && e.message || e), 5000); console.error(e); }
@@ -1524,10 +1545,38 @@ function recentHtml(siteId) {
   const rows = recentRows(siteId), c = hubCfg(), mo = S.hubMonths && S.hubMonths[recentMonths(1)[0]];
   const fresh = mo ? new Date(mo.at).toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' }) : null;
   let h = `<section><h2 class="h2">Siste inspeksjoner</h2>`;
-  h += rows.length ? `<div class="list">${rows.map(r => `<div class="mrow"><span class="rc-title">${esc(r.name)}</span><span class="rc-sub">${siteId ? '' : esc(SITES.find(s => s.id === r.siteId)?.short || '') + ' · '}${fmt(r.date)}${r.by ? ' · ' + esc(r.by) : ''}${r.flags ? ` · <b class="t-bad">${r.flags} avvik</b>` : ''}</span></div>`).join('')}</div>` : '<p class="empty">Ingen fullførte inspeksjoner ennå.</p>';
+  h += rows.length ? `<div class="list">${rows.map(r => `<button class="mrow" data-act="recent-pdf" data-id="${esc(r.id)}"><span class="rc-title">${esc(r.name)}</span><span class="rc-sub">${siteId ? '' : esc(SITES.find(s => s.id === r.siteId)?.short || '') + ' · '}${fmt(r.date)}${r.by ? ' · ' + esc(r.by) : ''}${r.flags ? ` · <b class="t-bad">${r.flags} avvik</b>` : ''}</span><span class="pdf-tag" aria-hidden="true">PDF</span><span class="sr">Åpne PDF-rapport</span></button>`).join('')}</div>` : '<p class="empty">Ingen fullførte inspeksjoner ennå.</p>';
   h += c ? `<div class="tr-line"><span class="${S.hubErrMsg ? 't-bad ' : 'muted '}small">${S.hubErrMsg ? esc(S.hubErrMsg) : fresh ? 'Oppdatert kl. ' + fresh : 'Ikke hentet ennå'}</span><button class="link" data-act="hub-sync">${S.hubBusy ? 'Oppdaterer…' : 'Oppdater nå'}</button></div>`
     : '<p class="muted small">Koble til Argus Hub under Innstillinger for å se det alle har gjort.</p>';
   return h + '</section>';
+}
+
+async function hubBlob(path) {
+  const c = hubCfg(); if (!c) throw new Error('Hub er ikke satt opp');
+  const r = await fetch(c.url + path, { headers: { 'x-argus-code': c.code } });
+  if (!r.ok) { const e = new Error(String(r.status)); e.status = r.status; throw e; }
+  return r.blob();
+}
+async function openRecentPdf(id) {
+  if (S.busy) return;
+  const ins = S.ins[id];
+  let rec = null; for (const mo of Object.values(S.hubMonths || {})) for (const r of mo.rows || []) if (r.id === id) rec = r;
+  S.busy = true; toast('Henter PDF…', 8000);
+  try {
+    let blob, name;
+    if (ins && ins.status === 'complete' && TPL[ins.templateId]) { blob = await buildReport(ins); name = pdfName(ins); }
+    else {
+      if (!hubCfg()) throw new Error('Koble til Hub under Innstillinger for å åpne PDF fra andre.');
+      if (!navigator.onLine) throw new Error('Du må ha nett for å hente denne PDF-en.');
+      blob = await hubBlob('/pdf/' + encodeURIComponent(id));
+      name = `${rec ? rec.name + ' ' + fmt(rec.date) : 'Rapport'}.pdf`.replace(/[\\/:*?"<>|]/g, '');
+    }
+    S.ready_file = { file: new File([blob], name, { type: 'application/pdf' }), title: 'PDF-rapporten er klar', canOpen: true };
+    $('#toast').hidden = true;
+  } catch (e) {
+    toast(e && e.status === 404 ? 'Fant ingen PDF i Hub for denne inspeksjonen. Den ble kanskje fullført uten nett.' : e && e.status ? hubErr(e) : (e && e.message || 'Kunne ikke hente PDF') , 6000);
+  }
+  S.busy = false; render();
 }
 
 /* ---------- Oppstart ---------- */

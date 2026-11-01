@@ -16,7 +16,7 @@
 :root {
   --bg: #edf1f3; --surface: #ffffff; --surface-2: #f5f7f8; --ink: #1b262c; --muted: #566874; --line: #d4dce1;
   --accent: #058479; --accent-ink: #ffffff; --accent-soft: #dcf1ee;
-  --ok: #1a7a4c; --bad: #c0172f; --bad-soft: #fcebee; --na: #5e6c76; --warn: #9a6200; --warn-soft: #fbf0d9; --ok-soft: #e2f2e9;
+  --blue: #1d6fb8; --blue-soft: #e1eefa; --ok: #1a7a4c; --bad: #c0172f; --bad-soft: #fcebee; --na: #5e6c76; --warn: #9a6200; --warn-soft: #fbf0d9; --ok-soft: #e2f2e9;
   --act-bg: #fff5d1; --act-line: #e2bf3d; --act-ink: #5c4708;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif;
   --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, system-ui, sans-serif;
@@ -27,7 +27,7 @@
   :root {
     --bg: #0d1418; --surface: #162128; --surface-2: #1c2932; --ink: #e5edf1; --muted: #93a4ae; --line: #2a3a44;
     --accent: #2fc2b2; --accent-ink: #06201d; --accent-soft: #14332f;
-    --ok: #3daf74; --bad: #ee5a6e; --bad-soft: #3a1d23; --na: #7f8d96; --warn: #e3a743; --warn-soft: #36290f; --ok-soft: #15301f;
+    --blue: #5aaaf0; --blue-soft: #14283b; --ok: #3daf74; --bad: #ee5a6e; --bad-soft: #3a1d23; --na: #7f8d96; --warn: #e3a743; --warn-soft: #36290f; --ok-soft: #15301f;
     --act-bg: #2e2812; --act-line: #8a7121; --act-ink: #f0d98a;
     color-scheme: dark;
   }
@@ -80,7 +80,7 @@ section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .tpl-meta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
 .pill { border-radius: 999px; padding: 3px 10px; font-size: 13px; font-weight: 600; }
 .pill.ok { background: var(--ok-soft); color: var(--ok); } .pill.bad { background: var(--bad-soft); color: var(--bad); }
-.pill.warn { background: var(--warn-soft); color: var(--warn); } .pill.na { background: var(--surface-2); color: var(--muted); }
+.pill.blue { background: var(--blue-soft); color: var(--blue); } .pill.warn { background: var(--warn-soft); color: var(--warn); } .pill.na { background: var(--surface-2); color: var(--muted); }
 
 .btn.inbox-card { display:flex; align-items:center; gap:12px; width:100%; text-align:left; margin:0 0 12px; background:#f5d98a; color:#2b2200; border:0; }
 .btn.inbox-card .inbox-n { flex:none; min-width:32px; height:32px; border-radius:16px; background:#2b2200; color:#f5d98a; display:flex; align-items:center; justify-content:center; font-weight:700; }
@@ -91,6 +91,9 @@ section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .ib-pics { display:flex; flex-wrap:wrap; gap:8px; }
 .ib-pics img { width:96px; height:96px; object-fit:cover; border-radius:10px; border:1px solid var(--line); }
 .mrow { display: flex; flex-direction: column; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 14px; }
+button.mrow { position: relative; width: 100%; text-align: left; padding-right: 58px; }
+button.mrow:active { background: var(--surface-2); }
+.mrow .pdf-tag { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); color: var(--accent); font-weight: 650; font-size: 14px; }
 .row-card, .act-line { display: flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding-right: 8px; }
 .act-line { padding-left: 14px; }
 .act-line input { width: 24px; height: 24px; accent-color: var(--ok); flex: none; }
@@ -217,7 +220,7 @@ a.btn.primary { color: var(--accent-ink); }
 .anl-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .chev { color: var(--muted); font-size: 20px; }
 .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; background: var(--na); }
-.dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); } .dot.na { background: transparent; border: 2px solid var(--na); }
+.dot.ok { background: var(--ok); } .dot.blue { background: var(--blue); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); } .dot.na { background: transparent; border: 2px solid var(--na); }
 .anl-all > summary { cursor: pointer; font-weight: 600; color: var(--accent); padding: 6px 2px; }
 .anl-all > .list { margin-top: 8px; }
 .cov { display: flex; flex-direction: column; gap: 8px; }
