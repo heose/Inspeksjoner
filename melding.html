@@ -47,37 +47,56 @@
   .done h2 { margin:0 0 8px; font-size:34px; }
   .small { font-size:14px; color:var(--muted); margin:0; padding-left:0; }
   .hp { position:absolute; left:-9999px; height:0; overflow:hidden; }
+  .chip { display:inline-block; background:color-mix(in srgb, var(--accent) 14%, transparent); color:var(--accent); border-radius:20px; padding:3px 12px; font-size:15px; font-weight:700; margin:0 0 12px; }
+  .opts { display:grid; gap:10px; border:0; margin:0; padding:0; min-width:0; }
+  .opt { display:flex; gap:12px; align-items:flex-start; border:1.5px solid var(--line); border-radius:var(--r); padding:14px; cursor:pointer; margin:0; font-weight:400; }
+  .opt:has(input:checked) { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, transparent); }
+  .opt:has(input:focus-visible) { outline:3px solid color-mix(in srgb, var(--accent) 40%, transparent); outline-offset:1px; }
+  .opt input { width:22px; height:22px; margin:2px 0 0; accent-color:var(--accent); flex:none; }
+  .opt strong { display:block; font-size:17px; }
+  .opt .sub { display:block; margin-top:2px; }
+  .chk { display:flex; gap:12px; align-items:flex-start; background:var(--surface); border:1px solid var(--line); border-radius:var(--r); padding:13px 14px; font-weight:600; margin:0; cursor:pointer; }
+  .chk input { width:22px; height:22px; margin:1px 0 0; accent-color:var(--accent); flex:none; }
+  .pick { display:grid; gap:10px; margin-top:18px; }
+  .pick a { display:block; text-decoration:none; text-align:center; font-weight:700; font-size:19px; color:var(--accent); border:1.5px solid var(--accent); border-radius:var(--r); padding:16px; }
   [hidden] { display:none !important; }
 </style>
 </head>
 <body>
 <main>
   <p class="co">Oseberg Drift og Service</p>
-  <h1>Meld fra om feil eller avvik</h1>
-  <p class="lead">Ser du noe som er ødelagt, farlig eller bør sjekkes? Send en kort melding, gjerne med bilde.</p>
+  <h1>Meld fra</h1>
+  <p class="chip" id="bygg" hidden></p>
+  <p class="lead" id="lead">Ser du noe som er ødelagt, farlig eller bør sjekkes? Send en kort melding, gjerne med bilde.</p>
   <p class="urgent"><strong>Akutt fare for liv eller helse: ring 110, 112 eller 113 først.</strong> Dette skjemaet er ikke for nødsituasjoner.</p>
+  <div class="msg err" id="loaderr" role="alert" hidden></div>
 
-  <form id="f" novalidate>
+  <div class="pick" id="chooser" hidden></div>
+
+  <form id="f" novalidate hidden>
     <section class="step">
       <div class="num">1</div>
       <div class="step-body">
-        <div>
-          <h2>Hvor?</h2>
-          <label for="where" class="sub" style="font-weight:400">Hvilket bygg eller hvilken leietaker gjelder det? f.eks. adresse eller firmanavn.</label>
-        </div>
-        <input type="text" id="where" maxlength="100" autocomplete="off">
+        <h2 id="h1cat">Hva gjelder det?</h2>
+        <fieldset class="opts" id="cats" aria-labelledby="h1cat"></fieldset>
       </div>
     </section>
 
-    <section class="step">
+    <section class="step" id="s2" hidden>
       <div class="num">2</div>
       <div class="step-body">
+        <h2>Hvor og hva?</h2>
         <div>
-          <h2>Hva er galt?</h2>
-          <label for="text" class="sub" style="font-weight:400">Beskriv hva som er galt og hvor. Etasje, rom, lokale etc.</label>
+          <label for="where" id="whereLbl">Hvor?</label>
+          <input type="text" id="where" maxlength="100" autocomplete="off" list="lokaler">
+          <datalist id="lokaler"></datalist>
+          <p class="sub hint" id="whereHint" style="margin-top:6px"></p>
         </div>
-        <textarea id="text" maxlength="2000" autocomplete="off"></textarea>
         <div>
+          <label for="text" id="textLbl">Beskriv saken</label>
+          <textarea id="text" maxlength="2000" autocomplete="off"></textarea>
+        </div>
+        <div id="picsBox">
           <span class="lbl">Legg gjerne ved bilder <span class="hint">(valgfritt, opptil 3)</span></span>
           <div class="pics" id="pics">
             <div class="addrow" id="addlbl">
@@ -86,10 +105,11 @@
             </div>
           </div>
         </div>
+        <label class="chk" id="urgentBox"><input type="checkbox" id="urgent"><span>Haster det? Kryss av, så ringer vi tilbake raskt.</span></label>
       </div>
     </section>
 
-    <section class="step">
+    <section class="step" id="s3" hidden>
       <div class="num">3</div>
       <div class="step-body">
         <h2>Hvem er du?</h2>
@@ -105,7 +125,7 @@
     </section>
 
     <div class="hp" aria-hidden="true"><label>Ikke fyll ut<input type="text" id="website" tabindex="-1" autocomplete="off"></label></div>
-    <div class="actions">
+    <div class="actions" id="actions" hidden>
       <div id="ts"></div>
       <div class="msg err" id="err" role="alert" hidden></div>
       <button class="btn" type="submit" id="send">Send melding</button>
@@ -127,6 +147,8 @@
 const HUB = 'https://argus-hub.osebergdrift-2e2.workers.dev';
 const SITEKEY = '0x4AAAAAAFun1ABDhmebHsg6';
 const MAX_PICS = 3;
+const B = (new URLSearchParams(location.search).get('b') || '').toLowerCase();
+let CFG = null, CAT = '';
 const $ = s => document.querySelector(s);
 const pics = []; // { url, b64 }
 let tsId = null, busy = false;
@@ -181,8 +203,9 @@ $('#f').addEventListener('submit', async e => {
   e.preventDefault(); if (busy) return; showErr('');
   const where = $('#where').value.trim(), text = $('#text').value.trim(), name = $('#name').value.trim(), phone = $('#phone').value.trim();
   const token = window.turnstile && tsId !== null ? window.turnstile.getResponse(tsId) : '';
-  if (where.length < 2) return showErr('Skriv hvilket bygg eller hvilken leietaker det gjelder.');
-  if (text.length < 5) return showErr('Beskriv kort hva som er galt og hvor.');
+  if (!CFG || !CAT) return showErr('Velg hva det gjelder.');
+  if (where.length < 2) return showErr(CAT === 'brikke' ? 'Skriv leilighet eller seksjon.' : 'Skriv hvor det gjelder.');
+  if (text.length < 5) return showErr(CAT === 'brikke' ? 'Skriv hvem som skal ha brikken, og hvorfor.' : 'Beskriv kort hva saken gjelder.');
   if (name.length < 2) return showErr('Skriv navnet ditt.');
   if (!/^[+\d][\d\s()+-]{5,29}$/.test(phone)) return showErr('Skriv et telefonnummer vi kan ringe.');
   if (!token) return showErr('Vent til robotsjekken er ferdig, og prøv igjen.');
@@ -190,11 +213,11 @@ $('#f').addEventListener('submit', async e => {
   try {
     const r = await fetch(HUB + '/melding', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ where, text, name, phone, website: $('#website').value, token, pics: pics.map(p => p.b64) }),
+      body: JSON.stringify({ b: CFG.id, cat: CAT, urgent: CAT !== 'brikke' && $('#urgent').checked, where, text, name, phone, website: $('#website').value, token, pics: CAT === 'brikke' ? [] : pics.map(p => p.b64) }),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || 'Noe gikk galt. Prøv igjen, eller ring oss.');
-    $('#f').hidden = true; document.querySelector('.lead').hidden = true; document.querySelector('.urgent').hidden = true; $('#done').hidden = false; window.scrollTo(0, 0);
+    $('#f').hidden = true; $('#lead').hidden = true; document.querySelector('.urgent').hidden = true; $('#done').hidden = false; window.scrollTo(0, 0);
   } catch (err) {
     showErr(err instanceof TypeError ? 'Fikk ikke kontakt. Sjekk nettet og prøv igjen.' : err.message);
     if (window.turnstile && tsId !== null) window.turnstile.reset(tsId);
@@ -203,9 +226,51 @@ $('#f').addEventListener('submit', async e => {
 });
 
 $('#again').addEventListener('click', () => {
-  $('#f').reset(); pics.length = 0; renderPics(); $('#f').hidden = false; document.querySelector('.lead').hidden = false; document.querySelector('.urgent').hidden = false; $('#done').hidden = true;
+  $('#f').reset(); pics.length = 0; renderPics(); CAT = ''; $('#s2').hidden = true; $('#s3').hidden = true; $('#actions').hidden = true; $('#f').hidden = false; $('#lead').hidden = false; document.querySelector('.urgent').hidden = false; $('#done').hidden = true;
   if (window.turnstile && tsId !== null) window.turnstile.reset(tsId);
 });
+
+const TXT = {
+  lokale:      { where: 'Hvilket lokale eller hvilken leietaker?', hint: 'Velg fra listen eller skriv selv.', text: 'Hva trengs? Beskriv arbeidet og hvor i lokalet.' },
+  fellesareal: { where: 'Hvor i bygget?', hint: 'F.eks. gang, parkeringsplass, uteområde eller teknisk rom.', text: 'Beskriv hva som trengs. Etasje, rom, område.' },
+  skade:       { where: 'Hvor har det skjedd?', hint: 'F.eks. gang, inngang, parkeringsplass eller lokale.', text: 'Beskriv skaden og når du oppdaget den.' },
+  brikke:      { where: 'Leilighet eller seksjon', hint: '', text: 'Hvem skal ha brikken, og hvorfor? (ny beboer, tapt, ekstra)' },
+};
+function pickCat(id) {
+  CAT = id; const t = TXT[id] || TXT.fellesareal;
+  $('#whereLbl').textContent = t.where; $('#whereHint').textContent = t.hint; $('#whereHint').hidden = !t.hint; $('#textLbl').textContent = t.text;
+  $('#where').setAttribute('list', id === 'lokale' ? 'lokaler' : '');
+  $('#picsBox').hidden = id === 'brikke'; $('#urgentBox').hidden = id === 'brikke'; $('#urgent').checked = id === 'skade';
+  $('#s2').hidden = false; $('#s3').hidden = false; $('#actions').hidden = false;
+}
+function showChooser(list, msg) {
+  const c = $('#chooser'); c.innerHTML = '';
+  list.forEach(x => { const a = document.createElement('a'); a.href = '?b=' + encodeURIComponent(x.id); a.textContent = x.name; c.appendChild(a); });
+  c.hidden = !list.length; $('#lead').textContent = 'Velg bygget meldingen gjelder.';
+  if (msg) { const e = $('#loaderr'); e.textContent = msg; e.hidden = false; }
+}
+async function loadConfig() {
+  try {
+    const r = await fetch(HUB + '/melding/config' + (B ? '?b=' + encodeURIComponent(B) : ''));
+    const j = await r.json().catch(() => ({}));
+    if (!B || r.status === 404) return showChooser(B ? (await (await fetch(HUB + '/melding/config')).json()).bygg : (j.bygg || []), B ? 'Fant ikke bygget i lenken. Velg bygg under.' : '');
+    if (!r.ok) throw new Error();
+    CFG = j; document.title = 'Meld fra – ' + j.name + ' – Oseberg Drift og Service';
+    const chip = $('#bygg'); chip.textContent = j.name; chip.hidden = false;
+    const box = $('#cats');
+    j.cats.forEach(c => {
+      const l = document.createElement('label'); l.className = 'opt';
+      const i = document.createElement('input'); i.type = 'radio'; i.name = 'cat'; i.value = c.id; i.addEventListener('change', () => pickCat(c.id));
+      const sp = document.createElement('span'); const st = document.createElement('strong'); st.textContent = c.label; const sb = document.createElement('span'); sb.className = 'sub'; sb.textContent = c.sub;
+      sp.append(st, sb); l.append(i, sp); box.appendChild(l);
+    });
+    const dl = $('#lokaler'); (j.lokaler || []).forEach(x => { const o = document.createElement('option'); o.value = x; dl.appendChild(o); });
+    $('#f').hidden = false;
+  } catch (e) {
+    const er = $('#loaderr'); er.textContent = 'Fikk ikke kontakt. Sjekk nettet og last siden på nytt, eller ring oss.'; er.hidden = false;
+  }
+}
+loadConfig();
 </script>
 </body>
 </html>

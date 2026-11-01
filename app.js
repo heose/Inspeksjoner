@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-01 å7';
+const APP_VERSION = '2026-11-01 å8';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -1504,7 +1504,9 @@ const guessSite = it => {
   const sc = SITES.map(x => ({ id: x.id, n: w.includes(norm(x.name)) ? 100 + x.name.length : (w.includes(norm(x.short)) || w.includes(norm(x.id))) ? 10 : 0 })).filter(x => x.n).sort((p, q) => q.n - p.n);
   return sc.length && (sc.length === 1 || sc[0].n > sc[1].n) ? sc[0].id : '';
 };
-const ibTitle = it => { const t = (it.text || '').replace(/\s+/g, ' ').trim(); return t.length > 70 ? t.slice(0, 67) + '…' : t; };
+const CAT_SHORT = { lokale: 'Eget lokale', fellesareal: 'Fellesareal', skade: 'Skade/hærverk', brikke: 'Adgangsbrikke' };
+const ibHigh = it => it.cat === 'skade' || !!it.urgent;
+const ibTitle = it => { const t = (it.text || '').replace(/\s+/g, ' ').trim(), p = CAT_SHORT[it.cat] ? CAT_SHORT[it.cat] + ': ' : ''; return p + (t.length > 70 ? t.slice(0, 67) + '…' : t); };
 async function loadInboxPics() {
   let any = false;
   for (const it of S.inbox || []) {
@@ -1583,7 +1585,8 @@ function renderInbox() {
   h += ny.map(it => {
     const ed = S.ibEdit[it.id] || {}, site = ed.site ?? guessSite(it);
     return `<section class="panel ib"><div class="ib-top"><strong>${esc(it.name)}</strong> <a href="tel:${esc(it.phone.replace(/[^\d+]/g, ''))}">${esc(it.phone)}</a><span class="muted small">${esc(fmtWhen(it.at))}</span></div>
-      ${it.where ? `<p class="muted small ib-where">Oppgitt bygg/leietaker: <strong>${esc(it.where)}</strong></p>` : ''}
+      ${it.cat ? `<p class="ib-tags"><span class="ib-cat${it.cat === 'skade' ? ' hi' : ''}">${esc(CAT_SHORT[it.cat] || it.cat)}</span>${it.urgent ? '<span class="ib-cat hi">Haster</span>' : ''}</p>` : ''}
+      ${it.where ? `<p class="muted small ib-where">${it.cat ? 'Hvor/lokale' : 'Oppgitt bygg/leietaker'}: <strong>${esc(it.where)}</strong></p>` : ''}
       <p class="ib-text">${esc(it.text)}</p>
       ${it.pics ? `<div class="ib-pics">${Array.from({ length: it.pics }, (_, i) => S.inboxPics[it.id + ':' + i] ? `<img src="${S.inboxPics[it.id + ':' + i]}" alt="Bilde ${i + 1} fra innmeldingen">` : '<span class="muted small">Laster bilde …</span>').join('')}</div>` : ''}
       <label class="fld"><span>Bygg</span><select class="inp" data-ib="site" data-id="${it.id}"><option value="">Velg bygg</option>${SITES.map(x => `<option value="${x.id}"${x.id === site ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
@@ -1611,8 +1614,9 @@ async function ibApprove(id, btn) {
   try {
     if (!ed.cardId) {
       const lab = await extLabel().catch(() => null);
-      const desc = `**Ekstern melding** (${fmtWhen(it.at)})\n**Fra:** ${it.name}, ${it.phone}\n**Bygg:** ${site.name}${it.where ? '\n**Oppgitt av avsender:** ' + it.where : ''}\n\n${it.text}`;
-      const params = { idList: listId, name: (ed.title ?? ibTitle(it)).trim() || ibTitle(it), desc, pos: 'top' }; if (lab) params.idLabels = lab;
+      const desc = `**Ekstern melding** (${fmtWhen(it.at)})\n**Fra:** ${it.name}, ${it.phone}\n**Bygg:** ${site.name}${it.cat ? '\n**Kategori:** ' + (CAT_SHORT[it.cat] || it.cat) + (it.urgent ? ' (haster)' : '') : ''}${it.where ? '\n**Oppgitt av avsender:** ' + it.where : ''}\n\n${it.text}`;
+      const hi = ibHigh(it) ? await prioLabel('Høy').catch(() => null) : null;
+      const params = { idList: listId, name: (ed.title ?? ibTitle(it)).trim() || ibTitle(it), desc, pos: 'top' }; const labs = [lab, hi].filter(Boolean); if (labs.length) params.idLabels = labs.join(',');
       const c = await tfetch('POST', 'cards', params); ed.cardId = c.id; ed.cardUrl = c.shortUrl || c.url || ''; ed.pics = 0;
     }
     for (let i = ed.pics || 0; i < (it.pics || 0); i++) {

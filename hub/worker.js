@@ -48,7 +48,7 @@ async function varsle(env, o = {}) {
   try {
     const r = await fetch('https://api.pushover.net/1/messages.json', {
       method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ token, user, title: o.title || 'Argus', message: o.message || 'Ny innmelding venter på godkjenning', url: o.url || 'https://heose.github.io/Inspeksjoner/', url_title: o.urlTitle || 'Åpne Argus' }).toString(),
+      body: new URLSearchParams({ token, user, title: o.title || 'Argus', message: o.message || 'Ny innmelding venter på godkjenning', url: o.url || 'https://argus.osebergdrift.no/', url_title: o.urlTitle || 'Åpne Argus', priority: String(o.priority || 0) }).toString(),
       signal: AbortSignal.timeout ? AbortSignal.timeout(4000) : undefined,
     });
     return r.ok;
@@ -158,6 +158,33 @@ async function snowCheck(env, o = {}) {
   return { ...f, sent: !!(card || pushed), pushed, card: card && card.shortUrl };
 }
 
+// Bygg og kategorier for meldingssiden (melding.html?b=op). Id-ene er de samme som i SITES i content.js.
+// Leietakerlister ligger i KV (nøkkel mcfg:<bygg>) og hentes av siden, så navn ikke havner i det offentlige repoet.
+const CATS = {
+  lokale: { label: 'Arbeid i eget lokale', short: 'Eget lokale', sub: 'Gjelder lokalet du leier. Gjelder det nøkkel, skriv det i beskrivelsen.' },
+  fellesareal: { label: 'Arbeid i fellesareal', short: 'Fellesareal', sub: 'Gang, parkering, uteområde, tekniske rom.' },
+  skade: { label: 'Skade / hærverk', short: 'Skade/hærverk', sub: 'Noe er ødelagt eller utsatt for skade.' },
+  brikke: { label: 'Ny adgangsbrikke', short: 'Adgangsbrikke', sub: 'Bestill ny brikke, for eksempel ved tap eller ny beboer.' },
+};
+const BYGG = {
+  op: { name: 'Olsrød Park', cats: ['lokale', 'fellesareal', 'skade'] },
+  vk: { name: 'Vekterkvartalet', cats: ['lokale', 'fellesareal', 'skade'] },
+  svk: { name: 'Sameiet VK', cats: ['lokale', 'fellesareal', 'skade', 'brikke'] },
+};
+const cleanLokaler = a => [...new Set((Array.isArray(a) ? a : []).map(x => cut(x, 80).trim()).filter(Boolean))].slice(0, 300);
+
+// Åpen: GET /melding/config            -> liste over bygg
+//       GET /melding/config?b=op       -> navn, kategorier og leietakerliste for bygget
+async function meldingConfig(req, env, url) {
+  const b = url.searchParams.get('b');
+  if (!b) return json(req, { bygg: Object.entries(BYGG).map(([id, x]) => ({ id, name: x.name })) });
+  const x = BYGG[b]; if (!x) return json(req, { error: 'Ukjent bygg' }, 404);
+  let lokaler = []; try { lokaler = cleanLokaler(JSON.parse(await env.ARGUS.get('mcfg:' + b) || '[]')); } catch (e) { /* ingen liste */ }
+  const r = json(req, { id: b, name: x.name, cats: x.cats.map(id => ({ id, label: CATS[id].label, sub: CATS[id].sub })), lokaler });
+  r.headers.set('cache-control', 'public, max-age=60');
+  return r;
+}
+
 async function melding(req, env) {
   const o = req.headers.get('Origin');
   if (o && !ORIGINS.includes(o)) return json(req, { error: 'Ikke tillatt' }, 403);
@@ -182,6 +209,12 @@ async function melding(req, env) {
 
   const t = x => String(x == null ? '' : x).trim();
   const text = t(d.text), name = t(d.name), phone = t(d.phone), where = t(d.where);
+  // Bygg og kategori (ny side). Uten b fungerer den gamle siden som før.
+  const site = t(d.b), cat = t(d.cat), urgent = !!d.urgent;
+  if (site) {
+    if (!BYGG[site]) return json(req, { error: 'Ukjent bygg. Åpne lenken på nytt.' }, 400);
+    if (!BYGG[site].cats.includes(cat)) return json(req, { error: 'Velg hva det gjelder.' }, 400);
+  }
   if (where.length < 2 || where.length > 100) return json(req, { error: 'Skriv hvilket bygg eller hvilken leietaker det gjelder.' }, 400);
   if (text.length < 5 || text.length > 2000) return json(req, { error: 'Beskriv saken med 5 til 2000 tegn.' }, 400);
   if (name.length < 2 || name.length > 80) return json(req, { error: 'Skriv navnet ditt.' }, 400);
@@ -196,9 +229,10 @@ async function melding(req, env) {
   }
   const id = crypto.randomUUID();
   for (let i = 0; i < bytes.length; i++) await env.ARGUS.put(`inboxpic:${id}:${i}`, bytes[i], { expirationTtl: MELD_TTL });
-  await env.ARGUS.put(`inbox:${id}`, JSON.stringify({ id, at: Date.now(), status: 'ny', where, text, name, phone, pics: bytes.length }), { expirationTtl: MELD_TTL });
+  await env.ARGUS.put(`inbox:${id}`, JSON.stringify({ id, at: Date.now(), status: 'ny', where, text, name, phone, pics: bytes.length, ...(site ? { site, cat, urgent } : {}) }), { expirationTtl: MELD_TTL });
   await bump(env);
-  await varsle(env);
+  const hast = cat === 'skade' || urgent;
+  await varsle(env, site ? { title: 'Argus – ' + BYGG[site].name, message: `Ny innmelding (${CATS[cat].short}${urgent ? ', haster' : ''}) venter på godkjenning`, priority: hast ? 1 : 0 } : {});
   return json(req, { ok: true });
 }
 
@@ -224,6 +258,7 @@ export default {
     const url = new URL(req.url);
     const p = url.pathname.split('/').filter(Boolean);
 
+    if (p[0] === 'melding' && p[1] === 'config' && !p[2] && req.method === 'GET') { try { return await meldingConfig(req, env, url); } catch (e) { return json(req, { error: 'Noe gikk galt' }, 500); } }
     if (p[0] === 'melding' && !p[1]) { try { return await melding(req, env); } catch (e) { return json(req, { error: 'Noe gikk galt. Prøv igjen, eller ring.' }, 500); } }
 
     const ip = req.headers.get('CF-Connecting-IP') || 'ukjent', failKey = 'fail:' + ip;
@@ -236,6 +271,16 @@ export default {
       // GET /ping
       if (req.method === 'GET' && p[0] === 'ping') return json(req, { ok: true, ts: Date.now() });
       if (req.method === 'GET' && p[0] === 'rev' && !p[1]) return json(req, { rev: await env.ARGUS.get('rev') });
+
+      // PUT /melding/config?b=op (bare administrator): leietakerliste for meldingssiden. Body: { "lokaler": ["Butikk A", ...] }
+      if (p[0] === 'melding' && p[1] === 'config' && req.method === 'PUT') {
+        if (!user.admin) return json(req, { error: 'Bare administrator' }, 403);
+        const b = url.searchParams.get('b'); if (!BYGG[b || '']) return json(req, { error: 'Ukjent bygg' }, 404);
+        let d; try { d = await req.json(); } catch (e) { return json(req, { error: 'Ugyldig JSON' }, 400); }
+        const l = cleanLokaler(d && d.lokaler);
+        await env.ARGUS.put('mcfg:' + b, JSON.stringify(l));
+        return json(req, { ok: true, n: l.length });
+      }
 
       // GET /snow  –  analyse av prognosen uten å sende noe.  POST /snow (bare administrator): kjør som cron.  POST /snow?test=1: send testvarsel.
       if (p[0] === 'snow' && !p[1]) {
