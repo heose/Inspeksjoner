@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-01 å3';
+const APP_VERSION = '2026-11-01 å4';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -436,7 +436,7 @@ function actLine(x, withSite) {
   return `<div class="act-line prio-${PRIO_CLS[pr] || 'lav'}"><input type="checkbox" id="hd-${esc(x.id)}" ${chk} aria-label="Merk som utført">
       <button class="row-main" ${go}>
       <span class="rc-title">${esc(x.text || '(uten beskrivelse)')}</span>
-      <span class="rc-sub"><b class="prio-tag">${esc(pr)}</b> · ${sh ? esc(sh) + ' · ' : ''}${esc(x.tplName)} · ${fmt(x.date)}${x.local ? '' : x.by ? ' · ' + esc(x.by) : ''}${x.due ? ` · <span class="${late ? 't-bad' : ''}">Frist ${fmt(x.due)}</span>` : ''}</span></button></div>`;
+      <span class="rc-sub"><b class="prio-tag">${esc(pr)}</b> · ${sh ? esc(sh) + ' · ' : ''}${esc(x.tplName)} · ${fmt(x.date)}${x.local && x.local.i.status !== 'complete' ? ' · <b class="t-bad">Kladd, deles ikke</b>' : ''}${x.local ? '' : x.by ? ' · ' + esc(x.by) : ''}${x.due ? ` · <span class="${late ? 't-bad' : ''}">Frist ${fmt(x.due)}</span>` : ''}</span></button></div>`;
 }
 const allOpen = openAll;
 function lastOf(tid, done) {
@@ -1439,7 +1439,9 @@ async function hubSync(manual) {
     const got = await Promise.all(need.map(async y => { try { return [y, await hubFetch('GET', '/month/' + y)]; } catch (e) { if (y === cur || e.status === 401) throw e; return null; } }));
     try { await loadLinks(); } catch (e) { if (e.status === 401) throw e; }
     try { S.inbox = (await hubFetch('GET', '/inbox')).items || []; } catch (e) { if (e.status === 401) throw e; S.inbox = S.inbox || null; }
-    try { await pushRemoteEdits(); await pullActs(); await pushActs(); await reapActs(); } catch (e) { if (e.status === 401) throw e; console.warn('Delte handlinger', e); }
+    S.actsErr = null;
+    try { await pushRemoteEdits(); await pullActs(); await pushActs(); await reapActs(); }
+    catch (e) { if (e.status === 401) throw e; S.actsErr = e.status === 404 ? 'Hub mangler oppdatering. Handlinger deles ikke ennå.' : hubErr(e); console.warn('Delte handlinger', e); }
     for (const g of got) if (g) S.hubMonths[g[0]] = { rows: g[1].rows || [], at: Date.now() };
     for (const y of Object.keys(S.hubMonths)) if (!yms.includes(y)) delete S.hubMonths[y];
     try { localStorage.setItem('insp-hub', JSON.stringify({ months: S.hubMonths })); } catch (e) {}
@@ -1631,11 +1633,24 @@ function recentRows(siteId) {
   for (const i of Object.values(S.ins)) if (i.status === 'complete' && TPL[i.templateId] && i.date) byId[i.id] = hubRec(i);
   return Object.values(byId).filter(r => r.tpl !== 'avvik' && (!siteId || r.siteId === siteId)).sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.at || 0) - (a.at || 0)).slice(0, RECENT_N);
 }
+function actsStatus() {
+  const c = hubCfg(); if (!c) return '';
+  let drafts = 0, unsent = 0, shared = 0;
+  for (const i of Object.values(S.ins)) if (TPL[i.templateId]) for (const a of Object.values(i.answers)) for (const act of a.actions || []) {
+    if (act.done || !(act.text || '').trim()) continue;
+    if (i.status !== 'complete') drafts++; else if (!act.hubSig) unsent++; else shared++;
+  }
+  const remote = Object.values(S.hubActs || {}).filter(r => !r.done).length;
+  if (S.actsErr) return `<p class="t-bad small">Delte handlinger: ${esc(S.actsErr)}</p>`;
+  const parts = [`${remote} åpne i Hub`, drafts ? `${drafts} i kladder (deles ikke)` : '', unsent ? `${unsent} venter på sending` : ''].filter(Boolean);
+  return `<p class="muted small">Delte handlinger: ${parts.join(' · ')}</p>`;
+}
 function recentHtml(siteId) {
   const rows = recentRows(siteId), c = hubCfg(), mo = S.hubMonths && S.hubMonths[recentMonths(1)[0]];
   const fresh = mo ? new Date(mo.at).toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' }) : null;
   let h = `<section><h2 class="h2">Siste inspeksjoner</h2>`;
   h += rows.length ? `<div class="list">${rows.map(r => `<button class="mrow" data-act="recent-pdf" data-id="${esc(r.id)}"><span class="rc-title">${esc(r.name)}</span><span class="rc-sub">${siteId ? '' : esc(SITES.find(s => s.id === r.siteId)?.short || '') + ' · '}${fmt(r.date)}${r.by ? ' · ' + esc(r.by) : ''}${r.flags ? ` · <b class="t-bad">${r.flags} avvik</b>` : ''}</span><span class="pdf-tag" aria-hidden="true">PDF</span><span class="sr">Åpne PDF-rapport</span></button>`).join('')}</div>` : '<p class="empty">Ingen fullførte inspeksjoner ennå.</p>';
+  h += actsStatus();
   h += c ? `<div class="tr-line"><span class="${S.hubErrMsg ? 't-bad ' : 'muted '}small">${S.hubErrMsg ? esc(S.hubErrMsg) : fresh ? 'Oppdatert kl. ' + fresh : 'Ikke hentet ennå'}</span><button class="link" data-act="hub-sync">${S.hubBusy ? 'Oppdaterer…' : 'Oppdater nå'}</button></div>`
     : '<p class="muted small">Koble til Argus Hub under Innstillinger for å se det alle har gjort.</p>';
   return h + '</section>';
