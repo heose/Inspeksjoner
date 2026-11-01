@@ -55,6 +55,11 @@ Hub tillater bare kallene appen trenger mot tavlen Vaktmester. Bytter du token i
 1. Cloudflare → Turnstile → Add widget. Hostname `argus.osebergdrift.no` (behold `heose.github.io` til overgangen er ferdig), modus Managed. Site key står i `melding.html`.
 2. Worker → Variables and Secrets → secret `TURNSTILE_SECRET` (Secret key fra Turnstile).
 3. Lim inn nyeste `hub/worker.js` og Deploy.
+**Én side per bygg (å8):** `melding.html?b=op`, `?b=vk`, `?b=svk`. Bygget kommer fra adressen og vises som merke. Kategorier: Arbeid i eget lokale, Arbeid i fellesareal, Skade/hærverk, og for SVK også Ny adgangsbrikke. Uten `b` vises et byggvalg. Bygg og kategorier er definert i `BYGG` og `CATS` i `worker.js` (id-ene er de samme som i `SITES` i content.js). Skade/hærverk og «Haster» gir Pushover-varsel med høy prioritet og etiketten «Prioritet høy» på Trello-kortet.
+
+Leietakerliste per bygg (valgfri, vises som forslag i «Hvilket lokale?»), lagres i Hub og ikke i repoet. Eksempel (bytt ut koden):
+`curl -X PUT "https://argus-hub.osebergdrift-2e2.workers.dev/melding/config?b=op" -H "x-argus-code: KODE" -H "content-type: application/json" -d '{"lokaler":["Butikk A","Kafé B"]}'`
+
 4. Avsender skriver bygg eller leietaker i fritekst (ingen bygg vises på siden, så den kan brukes for flere kunder). I Argus dukker meldinger opp som «Innmeldinger» på forsiden (oppdateres ved synk, eller trykk Oppdater nå). Velg bygg, rediger tittel og trykk Godkjenn til Trello. Kortet får etikett «Ekstern melding», bilder og kontaktinfo.
 
 Vern: robotsjekk (Turnstile), skjult felt mot roboter, maks 5 meldinger per time per avsender, maks 100 per døgn totalt, maks 3 JPEG-bilder per melding og 6 MB totalt. Meldinger og bilder slettes automatisk etter 90 dager.
