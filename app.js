@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-01 s';
+const APP_VERSION = '2026-11-01 t';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -695,7 +695,7 @@ document.addEventListener('click', async e => {
     case 'hub-test':
       try { await hubFetch('GET', '/ping'); toast('Koblet til Argus Hub', 4000); hubSync(); } catch (e) { toast(hubErr(e), 8000); }
       break;
-    case 'hub-sync': await hubSync(true); break;
+    case 'hub-sync': await syncTrello(); await hubSync(true); break;
     case 'gate-connect': await gateConnect(); break;
     case 'content-upload': $('#contentpick').click(); break;
     case 'export': await exportBackup(); break;
@@ -1301,5 +1301,5 @@ function monthHtml(siteId) {
   syncTrello(); hubSync();
   window.addEventListener('online', () => { syncTrello(); hubSync(); });
   let hubLast = Date.now();
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - hubLast > 60000) { hubLast = Date.now(); hubSync(); } });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - hubLast > 60000) { hubLast = Date.now(); syncTrello(); hubSync(); } });
 })();
