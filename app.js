@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-01 æ';
+const APP_VERSION = '2026-11-01 ø';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -797,13 +797,13 @@ document.addEventListener('change', e => {
 
 /* ---------- Bilder ---------- */
 function loadImage(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('Kunne ikke lese bildet')); i.src = src; }); }
-async function toJpeg(src, max = 1600) {
+async function toJpeg(src, max = 1600, q = 0.82) {
   const img = await loadImage(src);
   let w = img.naturalWidth, h = img.naturalHeight; const s = Math.min(1, max / Math.max(w, h));
   w = Math.round(w * s); h = Math.round(h * s);
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); g.drawImage(img, 0, 0, w, h);
-  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.82));
+  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', q));
   return { blob, w, h };
 }
 $('#filepick').addEventListener('change', async e => {
@@ -908,110 +908,101 @@ async function makePdf(ins) {
 
 const C = { ink: [20, 33, 42], muted: [86, 104, 116], line: [214, 222, 227], band: [233, 238, 241], ok: [26, 122, 76], bad: [192, 23, 47], na: [94, 108, 118], sel: [15, 90, 125], actBg: [255, 245, 209], actLine: [226, 191, 61], actInk: [92, 71, 8], white: [255, 255, 255], accent: [15, 90, 125] };
 
+/* ---------- PDF-rapport (design A «Rolig») ---------- */
+const RC = {
+  acc: [5, 132, 121], ink: [16, 36, 43], muted: [96, 112, 120], line: [221, 229, 231], tint: [243, 248, 248], white: [255, 255, 255],
+  ok: [22, 128, 84], okBg: [224, 243, 233], bad: [196, 30, 58], badBg: [253, 237, 240], badRow: [253, 245, 246],
+  na: [112, 124, 132], naBg: [232, 236, 238], sel: [5, 132, 121], selBg: [214, 237, 234],
+  actBg: [255, 246, 214], actLine: [226, 191, 61], actInk: [96, 72, 8]
+};
+// Nedskalerer bildet til rapporten (stort nok for 80 mm bredde), ellers brukes originalen
+async function reportPhoto(rec, max = 1000) {
+  const orig = async () => ({ data: new Uint8Array(await rec.blob.arrayBuffer()), w: rec.w, h: rec.h });
+  if (typeof document === 'undefined' || Math.max(rec.w, rec.h) <= max) return orig();
+  const url = URL.createObjectURL(rec.blob);
+  try {
+    const { blob, w, h } = await toJpeg(url, max, 0.75);
+    if (blob && blob.size < rec.blob.size) return { data: new Uint8Array(await blob.arrayBuffer()), w, h };
+  } catch (e) { /* bruk originalen */ } finally { URL.revokeObjectURL(url); }
+  return orig();
+}
+
 async function buildReport(ins) {
   const tpl = TPL[ins.templateId]; const d = new PDFDoc();
-  const W = 210, M = 16, CW = W - 2 * M, TOP = 18, BOT = 297 - 18, LH = 4.6;
+  const W = 210, M = 16, CW = W - 2 * M, TOP = 18, BOT = 279;
   let y = TOP;
   const items = [...walk(tpl, ins)];
   const st = stats(ins);
+  const secTitle = x => x.sec.title + (x.sec.repeat ? ` – ${x.sec.unit} ${x.i + 1}` : '');
 
+  // Bilder: nummereres i rekkefølge, vises store på slutten
   const pnum = {}, pinfo = {}; let pc = 0;
   for (const x of items) for (const pid of ins.answers[x.key]?.photos || []) {
     if (pid in pnum) continue;
     const rec = await DB.get('photos', pid).catch(() => null);
     if (!rec) continue;
     pnum[pid] = ++pc;
-    pinfo[pid] = { data: new Uint8Array(await rec.blob.arrayBuffer()), w: rec.w, h: rec.h, label: x.it.label };
+    pinfo[pid] = { ...(await reportPhoto(rec)), cap: secTitle(x) + '  ›  ' + x.it.label };
   }
+  const photosOf = a => (a?.photos || []).filter(p => pinfo[p]).map(p => pnum[p]);
   const need = h => { if (y + h > BOT) { d.addPage(); y = TOP; } };
 
-  // Tittel
-  d.text(S.settings.company, W - M, 11, { size: 8.5, bold: true, color: C.accent, align: 'right' });
-  d.wrap(tpl.name, 20, true, CW).forEach(l => { y += 8; d.text(l, M, y, { size: 20, bold: true, color: C.ink }); });
+  // Hvilke punkter teller: alt som er spørsmål (ikke overskrift/info)
+  const isQ = x => x.it.type !== 'heading' && x.it.type !== 'info';
+  let nOk = 0;
+  for (const x of items) { const a = ins.answers[x.key]; if (isQ(x) && CHOICE_TYPES.includes(x.it.type) && a?.value && toneFor(x.it, a.value) === 'ok') nOk++; }
+
+  // ----- Topp -----
+  d.rect(0, 0, W, 3.2, RC.acc);
+  d.text((S.settings.company || '').toUpperCase(), M, 13, { size: 8, bold: true, color: RC.acc });
+  y = 13;
+  const done = ins.status === 'complete', stLab = done ? 'Fullført' : 'Utkast', stw = d.width(stLab, 9, true) + 8;
+  d.wrap(tpl.name, 22, true, CW - stw - 6).forEach(l => { y += 9; d.text(l, M, y, { size: 22, bold: true, color: RC.ink }); });
+  d.rrect(W - M - stw, y - 5.6, stw, 7, 3.5, done ? RC.okBg : RC.naBg);
+  d.text(stLab, W - M - stw / 2, y - 0.8, { size: 9, bold: true, color: done ? RC.ok : RC.na, align: 'center' });
+  y += 6.5; d.text([ins.site, fmt(ins.date), ins.by].filter(Boolean).join('   ·   '), M, y, { size: 10, color: RC.muted });
   y += 7;
-  d.text(`${fmt(ins.date)} / ${ins.by}`, M, y, { size: 11, color: C.muted });
-  d.text(ins.status === 'complete' ? 'Fullført' : 'Utkast', W - M, y, { size: 9.5, bold: true, color: ins.status === 'complete' ? C.ok : C.na, align: 'right' });
-  y += 5;
-  const half = CW / 2 - 1;
-  d.rect(M, y, half, 10, C.band); d.rect(M + half + 2, y, half, 10, C.band);
-  d.text('Avvik', M + 3, y + 6.5, { size: 10, bold: true, color: C.ink }); d.text(String(st.flags), M + half - 3, y + 6.5, { size: 10, color: st.flags ? C.bad : C.ink, bold: !!st.flags, align: 'right' });
-  d.text('Handlinger', M + half + 5, y + 6.5, { size: 10, bold: true, color: C.ink }); d.text(String(st.actions), W - M - 3, y + 6.5, { size: 10, color: C.ink, align: 'right' });
-  y += 11;
-  for (const [k, v] of [['Sted', ins.site], ['Utført dato', fmt(ins.date)], ['Utført av', ins.by]]) {
-    d.text(k, M + 3, y + 6, { size: 10, bold: true, color: C.ink }); d.text(v || '', W - M - 3, y + 6, { size: 10, color: C.ink, align: 'right' });
-    y += 9; d.line(M, y, W - M, y, C.line);
-  }
-  y += 4;
+  const tiles = [['Punkter', st.total, RC.ink], ['Ok', nOk, RC.ok], ['Avvik', st.flags, st.flags ? RC.bad : RC.ink], ['Handlinger', st.actions, st.actions ? RC.bad : RC.ink], ['Bilder', pc, RC.ink]];
+  const tw = (CW - 4 * 3) / 5;
+  tiles.forEach(([lab, val, col], i) => {
+    const x = M + i * (tw + 3), warn = (lab === 'Avvik' || lab === 'Handlinger') && val > 0;
+    d.rrect(x, y, tw, 17, 2.5, warn ? RC.badBg : RC.tint);
+    d.text(String(val), x + 4, y + 9.2, { size: 17, bold: true, color: col });
+    d.text(lab, x + 4, y + 14.2, { size: 8, color: RC.muted });
+  });
+  y += 23;
 
-  function secHeader(title, right) {
-    need(18); y += 3;
-    d.rect(M, y, CW, 9, C.band);
-    d.text(title, M + 3, y + 6, { size: 11, bold: true, color: C.ink });
-    if (right) d.text(right, W - M - 3, y + 6, { size: 8.5, color: C.muted, align: 'right' });
-    y += 10;
-  }
-  function actBlock(act) {
-    const head = ['Handling', 'Ansvarlig: ' + (act.who || '-'), 'Prioritet: ' + (act.prio || '-'), 'Frist: ' + (act.due ? fmt(act.due) : '-')].concat(act.done ? ['Utført'] : []).join('   |   ');
-    const hl = d.wrap(head, 8.5, false, CW - 8), tl = d.wrap(act.text || '(uten beskrivelse)', 10, false, CW - 8);
-    const h = hl.length * 4 + tl.length * LH + 5;
-    need(h + 1.5);
-    d.rect(M, y, CW, h, C.actBg); d.rect(M, y, 1.2, h, C.actLine);
-    let yy = y + 4.3;
-    hl.forEach(l => { d.text(l, M + 4, yy, { size: 8.5, color: C.actInk }); yy += 4; });
-    tl.forEach(l => { d.text(l, M + 4, yy + 0.8, { size: 10, color: C.ink }); yy += LH; });
-    y += h + 1.5;
-  }
-  function itemBlock(x) {
-    const { it, key } = x; const a = ins.answers[key] || {};
-    if (it.type === 'heading') { need(12); y += 1.5; d.text(it.label, M + 2, y + 5, { size: 10, color: C.muted }); y += 7.5; d.line(M, y, W - M, y, C.line); return; }
-    if (it.type === 'info') { y += 1; for (const l of d.wrap(it.label, 8.5, false, CW - 4)) { need(4.2); d.text(l, M + 2, y + 3.2, { size: 8.5, color: C.muted }); y += 4; } y += 1.5; return; }
-    const v = a.value; let ans = null, tone = null;
-    if (CHOICE_TYPES.includes(it.type) && v) { ans = v; tone = toneFor(it, v); }
-    else if (it.type === 'multi' && Array.isArray(v) && v.length) { ans = v.join(', '); tone = 'sel'; }
-    else if (it.type === 'number' && v != null && v !== '') ans = String(v).replace('.', ',') + (it.unit ? ' ' + it.unit : '');
-    else if (it.type === 'date' && v) { ans = fmt(v); if (isFlag(it, a)) tone = 'bad'; }
-    else if (it.type === 'text' && v) ans = v;
-    const pillW = 52, pill = !!tone;
-    const lines = d.wrap(it.label, 10, true, CW - pillW - 8);
-    const al = ans != null ? d.wrap(ans, 10, false, pillW - 6) : [];
-    const rowH = Math.max(lines.length, al.length, 1) * LH + 5;
-    need(rowH + 1);
-    lines.forEach((l, i) => d.text(l, M + 2, y + 5.2 + i * LH, { size: 10, bold: true, color: C.ink }));
-    if (pill) d.rect(W - M - pillW, y + 0.6, pillW, rowH - 1.2, C[tone]);
-    al.forEach((l, i) => d.text(l, W - M - 3, y + 5.2 + i * LH, { size: 10, color: pill ? C.white : C.ink, align: 'right' }));
-    y += rowH;
-    if (a.note) {
-      for (const l of d.wrap(a.note, 9, false, CW - 4)) { need(4.4); d.text(l, M + 2, y + 3.4, { size: 9, color: C.muted }); y += 4.2; }
-      y += 1.5;
+  // ----- Krever oppfølging -----
+  const hits = items.filter(x => isQ(x) && (isFlag(x.it, ins.answers[x.key]) || (ins.answers[x.key]?.actions || []).length));
+  if (hits.length) {
+    d.text('Krever oppfølging', M, y + 3, { size: 11, bold: true, color: RC.bad }); y += 6;
+    for (const x of hits) {
+      const a = ins.answers[x.key] || {}, ph = photosOf(a);
+      const hl = d.wrap(`${secTitle(x)}  ›  ${x.it.label}${ph.length ? '   (bilde ' + ph.join(', ') + ')' : ''}`, 10, true, CW - 10);
+      const val = a.value != null && a.value !== '' ? (Array.isArray(a.value) ? a.value.join(', ') : String(a.value)) : '';
+      const vl = val && x.it.type === 'date' && isFlag(x.it, a) ? d.wrap('Svar: ' + fmt(val), 9, false, CW - 10) : [];
+      const nl = a.note ? d.wrap(a.note, 9, false, CW - 10) : [];
+      const al = (a.actions || []).map(z => ({ t: d.wrap(z.text || '(uten beskrivelse)', 9.5, false, CW - 10), meta: ['Ansvarlig ' + (z.who || '-'), 'Prioritet ' + (z.prio || '-'), 'Frist ' + (z.due ? fmt(z.due) : '-')].concat(z.done ? ['Utført'] : []).join('   ·   ') }));
+      const h = 4 + hl.length * 4.6 + vl.length * 4.2 + nl.length * 4.2 + al.reduce((n, z) => n + z.t.length * 4.4 + 5.4, 0) + 2.5;
+      need(h + 2.5);
+      d.rrect(M, y, CW, h, 2, RC.badBg); d.rect(M, y + 1.5, 1.2, h - 3, RC.bad);
+      let yy = y + 5.4;
+      hl.forEach(l => { d.text(l, M + 5, yy, { size: 10, bold: true, color: RC.ink }); yy += 4.6; });
+      vl.forEach(l => { d.text(l, M + 5, yy, { size: 9, color: RC.muted }); yy += 4.2; });
+      nl.forEach(l => { d.text(l, M + 5, yy, { size: 9, color: RC.muted }); yy += 4.2; });
+      al.forEach(z => { z.t.forEach(l => { d.text(l, M + 5, yy, { size: 9.5, color: RC.ink }); yy += 4.4; }); d.text(z.meta, M + 5, yy, { size: 8, color: RC.muted }); yy += 5.4; });
+      y += h + 2.5;
     }
-    const ps = (a.photos || []).filter(p => pinfo[p]);
-    if (ps.length) {
-      const th = 24; let x0 = M + 2; need(th + 7);
-      for (const p of ps) {
-        const pi = pinfo[p]; const tw = Math.min(th * pi.w / pi.h, CW - 4);
-        if (x0 + tw > W - M) { x0 = M + 2; y += th + 7; need(th + 7); }
-        d.image(pi.data, pi.w, pi.h, x0, y + 1, tw, th);
-        d.text('Bilde ' + pnum[p], x0, y + th + 4.6, { size: 7.5, color: C.muted });
-        x0 += tw + 5;
-      }
-      y += th + 7.5;
-    }
-    for (const act of a.actions || []) actBlock(act);
-    d.line(M, y, W - M, y, C.line);
-  }
-
-  // Sammendrag
-  const hits = items.filter(x => x.it.type !== 'heading' && x.it.type !== 'info' && (isFlag(x.it, ins.answers[x.key]) || (ins.answers[x.key]?.actions || []).length));
-  secHeader('Avvik og handlinger', `${st.flags} avvik, ${st.actions} handlinger`);
-  if (!hits.length) { need(9); d.text('Ingen avvik eller handlinger registrert.', M + 2, y + 5.5, { size: 10, color: C.muted }); y += 9; }
-  for (const x of hits) {
+    y += 3;
+  } else {
     need(14);
-    const ctx = x.sec.title + (x.sec.repeat ? ` – ${x.sec.unit} ${x.i + 1}` : '');
-    d.text(ctx, M + 2, y + 4, { size: 8, color: C.muted }); y += 4.5;
-    itemBlock(x);
+    d.rrect(M, y, CW, 11, 2.5, RC.okBg);
+    d.circle(M + 6.5, y + 5.5, 3, RC.ok); d.path([[M + 5, y + 5.6], [M + 6.2, y + 6.9], [M + 8.2, y + 4.2]], RC.white, 0.5);
+    d.text('Ingen avvik eller handlinger registrert', M + 12, y + 6.6, { size: 10.5, bold: true, color: RC.ok });
+    y += 17;
   }
 
-  // Avvik meldt siden forrige runde
+  // ----- Avvik meldt siden forrige runde -----
   if (tpl.id !== 'avvik') {
     const sites = SITES.filter(x => x.tpls.includes(tpl.id)).map(x => x.id);
     const covered = new Set(ANLEGG.filter(a => a.cov.some(c => c.t === tpl.id)).map(a => a.id));
@@ -1021,50 +1012,109 @@ async function buildReport(ins) {
     const av = Object.values(S.ins).filter(i => i.templateId === 'avvik' && i.status === 'complete' && sites.includes(i.siteId || ANL[i.anl]?.site)
       && (i.annet || covered.has(i.anl)) && (i.completedAt || 0) > after && (i.completedAt || 0) <= until).sort((a, b) => (a.completedAt || 0) - (b.completedAt || 0));
     if (av.length) {
-      secHeader('Avvik meldt siden forrige runde', `${av.length} ${av.length === 1 ? 'avviksmelding' : 'avviksmeldinger'}${prev ? ' etter ' + fmt(prev.date) : ''}`);
+      need(24);
+      d.text(`Avvik meldt siden forrige runde${prev ? ' (etter ' + fmt(prev.date) + ')' : ''}`, M, y + 3, { size: 11, bold: true, color: RC.ink }); y += 6.5;
       for (const i of av) {
-        need(14);
-        d.text(`${fmt(i.date)} · ${i.anl && ANL[i.anl] ? ANL[i.anl].name : 'Annet'}${(i.where || '').trim() ? ' · ' + i.where.trim() : ''} · meldt av ${i.by || '-'}`, M + 2, y + 4, { size: 8, color: C.muted }); y += 5.5;
-        for (const a of Object.values(i.answers)) for (const act of a.actions || []) actBlock(act);
+        const head = d.wrap(`${fmt(i.date)} · ${i.anl && ANL[i.anl] ? ANL[i.anl].name : 'Annet'}${(i.where || '').trim() ? ' · ' + i.where.trim() : ''} · meldt av ${i.by || '-'}`, 9, true, CW - 10);
+        const acts = []; for (const a of Object.values(i.answers)) for (const z of a.actions || []) acts.push(z);
+        const bl = acts.map(z => ({ t: d.wrap(z.text || '(uten beskrivelse)', 9.5, false, CW - 10), meta: ['Ansvarlig ' + (z.who || '-'), 'Prioritet ' + (z.prio || '-'), 'Frist ' + (z.due ? fmt(z.due) : '-')].concat(z.done ? ['Utført'] : []).join('   ·   ') }));
+        const h = 4 + head.length * 4.4 + bl.reduce((n, z) => n + z.t.length * 4.4 + 5.4, 0) + 1.5;
+        need(h + 2.5);
+        d.rrect(M, y, CW, h, 2, RC.actBg); d.rect(M, y + 1.5, 1.2, h - 3, RC.actLine);
+        let yy = y + 5.2;
+        head.forEach(l => { d.text(l, M + 5, yy, { size: 9, bold: true, color: RC.actInk }); yy += 4.4; });
+        bl.forEach(z => { z.t.forEach(l => { d.text(l, M + 5, yy, { size: 9.5, color: RC.ink }); yy += 4.4; }); d.text(z.meta, M + 5, yy, { size: 8, color: RC.actInk }); yy += 5.4; });
+        y += h + 2.5;
       }
+      y += 3;
     }
   }
 
-  // Alle seksjoner
-  let last = null;
+  // ----- Seksjoner (instruksjoner utelates; seksjoner uten spørsmål vises ikke) -----
+  const groups = []; let lastId = null;
   for (const x of items) {
     const id = x.sec.id + '#' + x.i;
-    if (id !== last) { last = id; secHeader(x.sec.title + (x.sec.repeat ? ` – ${x.sec.unit} ${x.i + 1}` : '')); }
-    itemBlock(x);
+    if (id !== lastId) { lastId = id; groups.push({ title: secTitle(x), rows: [] }); }
+    if (x.it.type === 'info') continue;
+    groups[groups.length - 1].rows.push(x);
+  }
+  let sn = 0;
+  for (const g of groups) {
+    if (!g.rows.some(isQ)) continue;
+    sn++; need(26); y += 1;
+    d.rrect(M, y, 6.4, 6.4, 1.6, RC.acc); d.text(String(sn), M + 3.2, y + 4.6, { size: 9, bold: true, color: RC.white, align: 'center' });
+    d.text(g.title, M + 9.5, y + 5, { size: 12.5, bold: true, color: RC.ink });
+    y += 8.8; d.line(M, y, W - M, y, RC.acc, 0.35); y += 1.2;
+    for (let ri = 0; ri < g.rows.length; ri++) {
+      const x = g.rows[ri], it = x.it, a = ins.answers[x.key] || {};
+      if (it.type === 'heading') {
+        if (!g.rows.slice(ri + 1).some(r => r.it.type !== 'heading')) continue;
+        need(16); y += 3; d.text(it.label.toUpperCase(), M + 1, y + 3.4, { size: 7.8, bold: true, color: RC.acc }); y += 5.4; continue;
+      }
+      const v = a.value; let ans = null, tone = null;
+      if (CHOICE_TYPES.includes(it.type) && v) { ans = v; tone = toneFor(it, v); }
+      else if (it.type === 'multi' && Array.isArray(v) && v.length) { ans = v.join(', '); tone = 'sel'; }
+      else if (it.type === 'number' && v != null && v !== '') ans = String(v).replace('.', ',') + (it.unit ? ' ' + it.unit : '');
+      else if (it.type === 'date' && v) { ans = fmt(v); if (isFlag(it, a)) tone = 'bad'; }
+      else if (it.type === 'text' && v) ans = String(v);
+      const ph = photosOf(a);
+      const label = it.label + (ph.length ? '   (bilde ' + (ph.length > 1 ? ph[0] + '–' + ph[ph.length - 1] : ph[0]) + ')' : '');
+      const longAns = ans != null && (it.type === 'text' || d.width(ans, 9, true) + 8 > 62);
+      const pillTxt = tone && !longAns ? ans : null;
+      const pw = pillTxt ? Math.max(15, d.width(pillTxt, 8.8, true) + 8) : 0;
+      const valW = ans != null && !tone && !longAns ? d.width(ans, 10.5, true) : 0;
+      const ll = d.wrap(label, 10, tone === 'bad', CW - Math.max(pw, valW, 20) - 10);
+      const bl = longAns ? d.wrap(ans, 10, false, CW - 12) : [];
+      const nl = a.note ? d.wrap(a.note, 9, false, CW - 12) : [];
+      const labH = Math.max(ll.length * 4.7, 6);
+      const bodyH = labH + 3.6 + bl.length * 4.6 + nl.length * 4.2;
+      need(bodyH + 1);
+      if (tone === 'bad') { d.rect(M, y, CW, bodyH, RC.badRow); d.rect(M, y, 1.1, bodyH, RC.bad); }
+      ll.forEach((l, i) => d.text(l, M + 3, y + 5.4 + i * 4.7, { size: 10, bold: tone === 'bad', color: RC.ink }));
+      if (pillTxt) {
+        const [bg, fg] = tone === 'ok' ? [RC.okBg, RC.ok] : tone === 'bad' ? [RC.bad, RC.white] : tone === 'sel' ? [RC.selBg, RC.sel] : [RC.naBg, RC.na];
+        d.rrect(W - M - 2 - pw, y + 1.4, pw, 6.2, 3.1, bg); d.text(pillTxt, W - M - 2 - pw / 2, y + 5.7, { size: 8.8, bold: true, color: fg, align: 'center' });
+      } else if (ans != null && !longAns) d.text(ans, W - M - 3, y + 5.4, { size: 10.5, bold: true, color: RC.ink, align: 'right' });
+      else if (ans == null && it.type !== 'text') d.text('–', W - M - 3, y + 5.4, { size: 10.5, color: RC.muted, align: 'right' });
+      let yy = y + labH + 1.2;
+      bl.forEach(l => { d.text(l, M + 3, yy + 3.4, { size: 10, color: tone === 'bad' ? RC.bad : RC.ink, bold: tone === 'bad' }); yy += 4.6; });
+      nl.forEach(l => { d.text(l, M + 3, yy + 3.4, { size: 9, color: RC.muted }); yy += 4.2; });
+      y += bodyH;
+      d.line(M, y, W - M, y, RC.line, 0.15);
+    }
+    y += 3;
   }
 
-  // Bildeoversikt
+  // ----- Bilder (store, to og to) -----
   if (pc) {
-    secHeader('Bildeoversikt', `${pc} ${pc === 1 ? 'bilde' : 'bilder'}`);
-    const colW = (CW - 8) / 2, maxH = 95; const list = Object.keys(pnum).sort((a, b) => pnum[a] - pnum[b]);
+    const pw = 80, gap = 10, x0 = M + (CW - 2 * pw - gap) / 2, maxH = 112;
+    d.addPage(); y = TOP;
+    d.text('Bilder', M, y + 4, { size: 16, bold: true, color: RC.ink }); d.line(M, y + 8, W - M, y + 8, RC.acc, 0.35); y += 14;
+    const list = Object.keys(pnum).sort((a, b) => pnum[a] - pnum[b]);
     for (let i = 0; i < list.length; i += 2) {
       const pair = list.slice(i, i + 2).map(p => {
-        const pi = pinfo[p]; let w = colW, h = w * pi.h / pi.w; if (h > maxH) { h = maxH; w = h * pi.w / pi.h; }
-        return { p, pi, w, h, cap: d.wrap(`Bilde ${pnum[p]} – ${pi.label}`, 8.5, false, colW) };
+        const pi = pinfo[p]; let w = pw, h = w * pi.h / pi.w; if (h > maxH) { h = maxH; w = h * pi.w / pi.h; }
+        return { p, pi, w, h, cap: d.wrap(pi.cap, 8, false, pw - 18)[0] };
       });
-      const rowH = Math.max(...pair.map(o => o.h + 3 + o.cap.length * 3.8)) + 5;
-      need(rowH);
+      const rowH = Math.max(...pair.map(o => o.h)) + 13;
+      if (y + rowH > BOT) { d.addPage(); y = TOP; }
       pair.forEach((o, j) => {
-        const x0 = M + j * (colW + 8);
-        d.image(o.pi.data, o.pi.w, o.pi.h, x0, y + 2, o.w, o.h);
-        o.cap.forEach((l, k) => d.text(l, x0, y + o.h + 6 + k * 3.8, { size: 8.5, color: C.muted }));
+        const x = x0 + j * (pw + gap);
+        d.image(o.pi.data, o.pi.w, o.pi.h, x, y, o.w, o.h);
+        d.text(`Bilde ${pnum[o.p]}`, x, y + o.h + 4.4, { size: 8.5, bold: true, color: RC.ink });
+        d.text(o.cap, x + 17, y + o.h + 4.4, { size: 8, color: RC.muted });
       });
       y += rowH;
     }
   }
 
-  // Bunntekst
+  // ----- Bunntekst -----
   const n = d.pages.length;
   for (let i = 0; i < n; i++) {
     d.usePage(i);
-    d.line(M, 297 - 13, W - M, 297 - 13, C.line);
-    d.text(`${tpl.name} · ${ins.site} · ${fmt(ins.date)}`, M, 297 - 8.5, { size: 8, color: C.muted });
-    d.text(`Side ${i + 1} av ${n}`, W - M, 297 - 8.5, { size: 8, color: C.muted, align: 'right' });
+    d.line(M, 284, W - M, 284, RC.line);
+    d.text(`${tpl.name}  ·  ${ins.site}  ·  ${fmt(ins.date)}`, M, 289, { size: 8, color: RC.muted });
+    d.text(`Side ${i + 1} av ${n}`, W - M, 289, { size: 8, color: RC.muted, align: 'right' });
   }
   return d.output();
 }
