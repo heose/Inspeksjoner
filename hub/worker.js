@@ -372,7 +372,7 @@ export default {
             const str = (v, n) => String(v == null ? '' : v).slice(0, n);
             const url = str(l && l.url, 1500).trim();
             if (!/^https:\/\//i.test(url)) return json(req, { error: 'Lenker må starte med https://' }, 400);
-            clean.push({ id: str(l.id, 40) || Math.random().toString(36).slice(2, 10), title: str(l.title, 100).trim() || 'Uten navn', desc: str(l.desc, 200).trim(), url, group: l.group === 'intern' ? 'intern' : 'share' });
+            clean.push({ id: str(l.id, 40) || Math.random().toString(36).slice(2, 10), title: str(l.title, 100).trim() || 'Uten navn', desc: str(l.desc, 200).trim(), url, sheet: /^https:\/\//i.test(str(l.sheet, 1500).trim()) ? str(l.sheet, 1500).trim() : '', group: l.group === 'intern' ? 'intern' : 'share' });
           }
           await env.ARGUS.put('links', JSON.stringify(clean), { metadata: { at: Date.now(), by: user.name } });
           return json(req, { ok: true, n: clean.length });
