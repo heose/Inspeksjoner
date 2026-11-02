@@ -339,49 +339,43 @@ function meterPages(d, model, o) {
 }
 async function makeXlsx(ins) {
   if (!ins) return;
-  const tpl = TPL[ins.templateId], m = meterModel(tpl), { pts, dates } = m;
+  const tpl = TPL[ins.templateId], { pts, dates } = meterModel(tpl);
   if (!dates.length) { toast('Ingen avlesninger å lage Excel av ennå', 3500); return; }
-  const X = XLSX, n = dates.length, qM = X.q('Målerstand'), qF = X.q('Forbruk'), qS = X.q('Snitt');
-  const hdr = t => ({ v: t, s: 1 });
-  // Målerstand: én rad per avlesning, eldste øverst. Netto er formler (varmtvann minus sirkulasjon).
-  const c0 = new Map(pts.map((p, i) => [p.key, i + 1]));
-  const rowsM = [[hdr('Dato'), ...pts.map(p => hdr(p.calc ? p.title : p.label))]];
-  dates.forEach((dt, r) => rowsM.push([{ v: X.serial(dt), s: 2 }, ...pts.map((p, ci) => {
-    const v = p.vals[r];
-    if (p.calc) { const a = c0.get(p.calc.a), mi = c0.get(p.calc.minus); return v == null ? null : { f: `${X.col(a)}${r + 2}-N(${X.col(mi)}${r + 2})`, v, s: 8 }; }
-    return v == null ? null : { v, s: 3 };
+  const X = XLSX, n = dates.length, k = n - 1, qM = X.q('Målerstand'), qF = X.q('Forbruk'), qS = X.q('Snitt');
+  const hdr = t => ({ v: t, s: 1 }), nm = p => p.calc ? p.title : p.label, di = j => n - 1 - j;   // kolonne j = nyeste først
+  const rowOf = new Map(pts.map((p, i) => [p.key, i + 2]));
+  // Målerstand: målernavn nedover, datoer på toppraden (nyeste til venstre). Netto er formler (varmtvann minus sirkulasjon).
+  const rowsM = [];
+  rowsM[0] = [hdr('Måler'), ...dates.map((_, j) => ({ v: X.serial(dates[di(j)]), s: 9 }))];
+  pts.forEach((p, r) => rowsM.push([{ v: nm(p), s: 5 }, ...dates.map((_, j) => {
+    const v = p.vals[di(j)]; if (v == null) return null; const L = X.col(j + 1);
+    return p.calc ? { f: `${L}${rowOf.get(p.calc.a)}-N(${L}${rowOf.get(p.calc.minus)})`, v, s: 8 } : { v, s: 3 };
   })]));
-  const sheetM = { name: 'Målerstand', rows: rowsM, cols: [13, ...pts.map(() => 17)], freeze: { c: 1, r: 1 }, rowHeights: { 0: 54 } };
-  // Forbruk: formler mot Målerstand. Snitt nederst.
-  const rowsF = [[hdr('Avlesning'), ...pts.map(p => hdr(p.calc ? p.title : p.label))]];
-  for (let r = 1; r < n; r++) rowsF.push([{ f: `${qM}!A${r + 2}`, v: X.serial(dates[r]), s: 6 }, ...pts.map((p, ci) => {
-    const v = p.use[r]; if (v == null) return null; const L = X.col(ci + 1);
-    return { f: `IF(AND(ISNUMBER(${qM}!${L}${r + 2}),ISNUMBER(${qM}!${L}${r + 1})),${qM}!${L}${r + 2}-${qM}!${L}${r + 1},"")`, v, s: 3 };
-  })]);
-  if (n > 1) {
-    rowsF.push([]);
-    rowsF.push([{ v: 'Snitt', s: 5 }, ...pts.map((p, ci) => p.avg == null ? null : { f: `AVERAGE(${X.col(ci + 1)}2:${X.col(ci + 1)}${n})`, v: p.avg, s: 7 })]);
-  }
-  const sheetF = { name: 'Forbruk', rows: rowsF, cols: [13, ...pts.map(() => 17)], freeze: { c: 1, r: 1 }, rowHeights: { 0: 54 } };
-  const sheets = [sheetM, sheetF];
-  if (n > 1) {
-    const avgRow = n + 2;   // rad for Snitt i Forbruk (1-basert): header + (n-1) rader + tom rad + snitt
-    const gp = pts.map((p, ci) => ({ p, ci })).filter(x => x.p.graph);
-    // Snitt: samme snitt gjentatt per rad, slik at diagrammene kan tegne en snittlinje
-    const rowsS = [[hdr('Avlesning'), ...gp.map(x => hdr(x.p.calc ? x.p.title : x.p.label))]];
-    for (let r = 1; r < n; r++) rowsS.push([{ f: `${qF}!A${r + 1}`, v: X.serial(dates[r]), s: 6 }, ...gp.map(x => x.p.avg == null ? null : { f: `${qF}!$${X.col(x.ci + 1)}$${avgRow}`, v: x.p.avg, s: 4 })]);
-    const sheetS = { name: 'Snitt', rows: rowsS, cols: [13, ...gp.map(() => 17)], freeze: { c: 1, r: 1 }, rowHeights: { 0: 54 } };
-    const catF = `${qF}!$A$2:$A$${n}`, catV = dates.slice(1).map(X.serial);
-    const charts = gp.map((x, k) => ({
-      title: x.p.title, cat: { f: catF, vals: catV },
+  const widths = [46, ...dates.map(() => 12)];
+  const sheets = [{ name: 'Målerstand', rows: rowsM, cols: widths, freeze: { c: 1, r: 1 } }];
+  if (k > 0) {
+    // Forbruk: forskjell mot forrige avlesning (kolonnen til høyre), formler mot Målerstand. Snitt i siste kolonne.
+    const A = X.col(k + 1);
+    const rowsF = [[hdr('Måler'), ...Array.from({ length: k }, (_, j) => ({ f: `${qM}!${X.col(j + 1)}1`, v: X.serial(dates[di(j)]), s: 9 })), hdr('Snitt')]];
+    pts.forEach((p, r) => rowsF.push([{ v: nm(p), s: 5 }, ...Array.from({ length: k }, (_, j) => {
+      const v = p.use[di(j)]; if (v == null) return null; const L = X.col(j + 1), P = X.col(j + 2), R = r + 2;
+      return { f: `IF(AND(ISNUMBER(${qM}!${L}${R}),ISNUMBER(${qM}!${P}${R})),${qM}!${L}${R}-${qM}!${P}${R},"")`, v, s: 3 };
+    }), p.avg == null ? null : { f: `AVERAGE(B${r + 2}:${X.col(k)}${r + 2})`, v: p.avg, s: 7 }]));
+    sheets.push({ name: 'Forbruk', rows: rowsF, cols: [46, ...Array.from({ length: k }, () => 12), 12], freeze: { c: 1, r: 1 } });
+    const gp = pts.map((p, r) => ({ p, r: r + 2 })).filter(x => x.p.graph);
+    const rowsS = [[hdr('Måler'), ...Array.from({ length: k }, (_, j) => ({ f: `${qM}!${X.col(j + 1)}1`, v: X.serial(dates[di(j)]), s: 9 }))]];
+    gp.forEach(x => rowsS.push([{ v: nm(x.p), s: 5 }, ...Array.from({ length: k }, () => x.p.avg == null ? null : { f: `${qF}!$${A}$${x.r}`, v: x.p.avg, s: 4 })]));
+    const catV = Array.from({ length: k }, (_, j) => X.serial(dates[di(j)]));
+    const charts = gp.map((x, g) => ({
+      title: x.p.title, rev: true, cat: { f: `${qF}!$B$1:$${X.col(k)}$1`, vals: catV },
       series: [
-        { name: 'Forbruk', f: `${qF}!$${X.col(x.ci + 1)}$2:$${X.col(x.ci + 1)}$${n}`, vals: x.p.use.slice(1), color: '058479', type: 'bar' },
-        { name: 'Snitt', f: `${qS}!$${X.col(k + 1)}$2:$${X.col(k + 1)}$${n}`, vals: x.p.use.slice(1).map(() => x.p.avg), color: 'C41E3A', type: 'line' },
+        { name: 'Forbruk', f: `${qF}!$B$${x.r}:$${X.col(k)}$${x.r}`, vals: Array.from({ length: k }, (_, j) => x.p.use[di(j)]), color: '058479', type: 'bar' },
+        { name: 'Snitt', f: `${qS}!$B$${g + 2}:$${X.col(k)}$${g + 2}`, vals: Array.from({ length: k }, () => x.p.avg), color: 'C41E3A', type: 'line' },
       ],
-      a: { c0: (k % 2) * 9, r0: 2 + Math.floor(k / 2) * 17, c1: (k % 2) * 9 + 8, r1: 2 + Math.floor(k / 2) * 17 + 16 },
+      a: { c0: (g % 2) * 9, r0: 2 + Math.floor(g / 2) * 17, c1: (g % 2) * 9 + 8, r1: 2 + Math.floor(g / 2) * 17 + 16 },
     }));
     sheets.push({ name: 'Grafer', rows: [[{ v: 'Forbruk per måned med snitt (diagrammene bruker arkene Forbruk og Snitt)', s: 5 }]], cols: [], noGrid: true, charts });
-    sheets.push(sheetS);
+    sheets.push({ name: 'Snitt', rows: rowsS, cols: [46, ...Array.from({ length: k }, () => 12)], freeze: { c: 1, r: 1 } });
   }
   const blob = XLSX.build({ sheets });
   const name = `${tpl.name} målerstand og forbruk ${todayISO()}.xlsx`.replace(/[\\/:*?"<>|]/g, '');
