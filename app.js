@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-01 å14';
+const APP_VERSION = '2026-11-02 å15';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -229,22 +229,164 @@ function mailRows(ins) {
   rows.push(['Navn på innsender', ins.by || '']);
   return rows;
 }
+/* E-post: mailto kan ikke bære tabell (Gmail på iOS slår sammen linjeskift og tabulator). Tabellen kopieres derfor som ekte HTML-tabell, og e-posten åpnes med mottaker, emne og innledning. */
+function mailTableHTML(rows) {
+  const td = 'border:1px solid #999;padding:3px 10px;font-family:Arial,Helvetica,sans-serif;font-size:14px';
+  return `<table style="border-collapse:collapse">${rows.map(r => `<tr><td style="${td}">${esc(r[0])}</td><td style="${td};text-align:right">${esc(r[1])}</td></tr>`).join('')}</table>`;
+}
+async function mailClip(ins) {
+  const rows = mailRows(ins), plain = rows.map(r => r.join('\t')).join('\r\n');
+  try {
+    if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([mailTableHTML(rows)], { type: 'text/html' }), 'text/plain': new Blob([plain], { type: 'text/plain' }) })]);
+    else await navigator.clipboard.writeText(plain);
+    return true;
+  } catch (e) { return false; }
+}
 async function mailCopy(ins) {
   if (!ins) return;
-  const rows = mailRows(ins), plain = rows.map(r => r.join('\t')).join('\n');
-  const html = `<table>${rows.map(r => `<tr><td>${esc(r[0])}</td><td style="text-align:right">${esc(r[1])}</td></tr>`).join('')}</table>`;
-  try {
-    if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([plain], { type: 'text/plain' }) })]);
-    else await navigator.clipboard.writeText(plain);
-    toast('Tabellen er kopiert. Lim den inn i e-posten.', 3500);
-  } catch (e) { try { await navigator.clipboard.writeText(plain); toast('Tabellen er kopiert som tekst.', 3500); } catch (e2) { window.prompt('Kopier tabellen', plain); } }
+  if (await mailClip(ins)) toast('Tabellen er kopiert. Lim den inn i e-posten.', 3500);
+  else window.prompt('Kopier tabellen', mailRows(ins).map(r => r.join('\t')).join('\n'));
 }
-function mailOpen(ins) {
+async function mailOpen(ins) {
   if (!ins) return;
   const m = TPL[ins.templateId].mail || {}, rows = mailRows(ins), mnd = MONTHS[+(ins.date || '').slice(5, 7) - 1] || '';
-  const body = (m.intro || 'Hei.\n\nHer kommer tallene for {mnd}.').replace('{mnd}', mnd) + '\n\n' + rows.map(r => r.join('\t')).join('\n');
+  const ok = await mailClip(ins);
+  let body = (m.intro || 'Hei.\n\nHer kommer tallene for {mnd}.').replace('{mnd}', mnd).replace(/\r?\n/g, '\r\n') + '\r\n\r\n';
+  if (!ok) body += rows.map(r => r.join(': ')).join('\r\n');   // uten utklippstavle: tallene som vanlige linjer i teksten
+  else toast('Tabellen er kopiert. Lim den inn i e-posten (trykk i teksten, Lim inn).', 6000);
   const q = [m.cc ? 'cc=' + encodeURIComponent(m.cc) : '', 'subject=' + encodeURIComponent(m.subject || ''), 'body=' + encodeURIComponent(body)].filter(Boolean).join('&');
   location.href = `mailto:${m.to || ''}?${q}`;
+}
+/* ---------- Målerstand og forbruk: felles modell for PDF og Excel ---------- */
+function meterModel(tpl, upto) {
+  upto = upto || '9999-12-31';
+  const pts = [];
+  for (const sec of tpl.sections) if (!sec.repeat) for (const it of sec.items) if (it.meter || it.calc) pts.push({ key: sec.id + '.' + it.id, it, calc: it.calc || null, unit: it.unit || 'm³',
+    label: it.label, title: (typeof it.mail === 'string' ? it.mail : it.label.replace(/, avlest$/, '')) + (it.calc ? ' (netto)' : ''), graph: !!it.mail });
+  const byDate = new Map(), put = (d, k, v) => { if (v == null || d > upto) return; if (!byDate.has(d)) byDate.set(d, {}); byDate.get(d)[k] = v; };
+  for (const h of tpl.history || []) for (const p of pts) if (!p.calc) put(h.d, p.key, numOf(h.v && h.v[p.key]));
+  for (const i of Object.values(S.ins)) if (i.templateId === tpl.id && i.date) for (const p of pts) put(i.date, p.key, numOf(i.answers[p.key]?.value));
+  for (const p of pts) if (p.calc) for (const [d, v] of byDate) if (v[p.key] == null) { const a = v[p.calc.a]; if (a != null) v[p.key] = Math.round((a - (v[p.calc.minus] ?? 0)) * 100) / 100; }
+  const dates = [...byDate.keys()].sort();
+  if (!pts.some(p => p.graph)) pts.forEach(p => { p.graph = true; });
+  for (const p of pts) {
+    p.vals = dates.map(d => byDate.get(d)[p.key] ?? null);
+    p.use = dates.map((d, i) => i && p.vals[i] != null && p.vals[i - 1] != null ? Math.round((p.vals[i] - p.vals[i - 1]) * 100) / 100 : null);
+    const u = p.use.filter(x => x != null); p.avg = u.length ? u.reduce((a, b) => a + b, 0) / u.length : null;
+  }
+  return { pts, dates };
+}
+const mon3 = d => MONTHS[+d.slice(5, 7) - 1].slice(0, 3);
+function meterBars(d, x, y, w, h, p, dates) {
+  const idx = []; for (let i = 1; i < dates.length; i++) idx.push(i);
+  const sel = idx.slice(-18), vals = sel.map(i => p.use[i]);
+  d.text(p.title, x, y + 3, { size: 8.5, bold: true, color: RC.ink });
+  if (p.avg != null) d.text('Snitt ' + nbsp(Math.round(p.avg * 10) / 10), x + w, y + 3, { size: 7.5, color: RC.muted, align: 'right' });
+  const px = x + 9, py = y + 7, pw = w - 10, ph = h - 7 - 6, nv = vals.filter(v => v != null);
+  if (!nv.length) { d.text('Ingen forbruk å vise ennå', px, py + ph / 2, { size: 8, color: RC.muted }); return; }
+  const hi = Math.max(1, ...nv, (p.avg || 0) * 1.15), lo = Math.min(0, ...nv), rng = hi - lo, Y = v => py + ph - (v - lo) / rng * ph, base = Y(0);
+  d.line(px, py, px + pw, py, RC.line, 0.15); d.line(px, base, px + pw, base, RC.muted, 0.25);
+  d.text(nbsp(Math.round(hi)), px - 1.5, py + 2, { size: 6, color: RC.muted, align: 'right' }); d.text('0', px - 1.5, base + 1.5, { size: 6, color: RC.muted, align: 'right' });
+  const slot = pw / sel.length, bw = Math.min(slot * 0.62, 9);
+  sel.forEach((di, j) => {
+    const v = p.use[di], cx = px + slot * (j + 0.5);
+    if (v != null) {
+      const dev = p.avg ? v - p.avg : 0, odd = p.avg > 0 && Math.abs(dev) > p.avg * 0.3 && Math.abs(dev) >= 2;
+      const col = odd ? (dev > 0 ? RC.bad : RC.actLine) : RC.acc, t = Y(Math.max(v, 0)), b = Y(Math.min(v, 0));
+      d.rect(cx - bw / 2, t, bw, Math.max(b - t, 0.3), col);
+      if (slot >= 4.6) d.text(nbsp(Math.round(v * 10) / 10), cx, (v >= 0 ? t - 0.8 : base - 0.8), { size: 5.8, color: odd ? col : RC.muted, bold: odd, align: 'center' });
+    }
+    if (slot >= 5.2 || j % 2 === 0) d.text(mon3(dates[di]), cx, py + ph + 3.6, { size: 6.2, color: RC.muted, align: 'center' });
+  });
+  if (p.avg != null) { const ay = Y(p.avg); for (let xx = px; xx < px + pw; xx += 2.6) d.line(xx, ay, Math.min(xx + 1.5, px + pw), ay, RC.ink, 0.3); }
+}
+function meterPages(d, model, o) {
+  const { pts, dates } = model, { W, M, CW, TOP, BOT } = o;
+  if (dates.length < 1) return;
+  const unit = (pts[0].unit || 'm³').replace('³', '3');
+  let y = TOP; d.addPage();
+  d.text('Målerstand', M, y + 4, { size: 16, bold: true, color: RC.ink }); d.line(M, y + 8, W - M, y + 8, RC.acc, 0.35); y += 12;
+  d.text(`Avlest stand (${unit}), nyeste måned først. Netto varmtvann = varmtvann minus sirkulasjon.`, M, y + 2, { size: 8.5, color: RC.muted }); y += 6;
+  const desc = [...dates.keys()].reverse(), PER = 6, LW = 58, cw = (CW - LW) / PER, rh = 4.7;
+  for (let b = 0; b < desc.length; b += PER) {
+    const blk = desc.slice(b, b + PER), bh = 7 + pts.length * rh + 4;
+    if (y + bh > BOT) { d.addPage(); y = TOP; }
+    d.rect(M, y, CW, 6.2, RC.acc);
+    blk.forEach((di, j) => d.text(dates[di].slice(8, 10) + '.' + dates[di].slice(5, 7) + '.' + dates[di].slice(2, 4), M + LW + cw * (j + 1) - 2, y + 4.4, { size: 8, bold: true, color: RC.white, align: 'right' }));
+    d.text('Måler', M + 2, y + 4.4, { size: 8, bold: true, color: RC.white });
+    y += 6.2;
+    pts.forEach((p, r) => {
+      if (p.calc) d.rect(M, y, CW, rh, RC.selBg); else if (r % 2) d.rect(M, y, CW, rh, RC.tint);
+      let lab = p.calc ? p.title : p.label; while (d.width(lab, 8, !!p.calc) > LW - 3 && lab.length > 4) lab = lab.slice(0, -2);
+      d.text(lab === (p.calc ? p.title : p.label) ? lab : lab + '…', M + 2, y + 3.4, { size: 8, bold: !!p.calc, color: RC.ink });
+      blk.forEach((di, j) => { const v = p.vals[di]; d.text(v == null ? '–' : nbsp(v), M + LW + cw * (j + 1) - 2, y + 3.4, { size: 8, bold: di === dates.length - 1 || !!p.calc, color: v == null ? RC.muted : RC.ink, align: 'right' }); });
+      y += rh;
+    });
+    d.line(M, y, W - M, y, RC.line, 0.2); y += 5;
+  }
+  const gp = pts.filter(p => p.graph);
+  if (dates.length > 1 && gp.length) {
+    d.addPage(); y = TOP;
+    d.text('Forbruk per måned', M, y + 4, { size: 16, bold: true, color: RC.ink }); d.line(M, y + 8, W - M, y + 8, RC.acc, 0.35); y += 12;
+    d.text(`Forbruk (${unit}) = avlesning minus forrige avlesning. Stiplet linje = snitt. Rød søyle: over 30 % over snitt. Gul søyle: over 30 % under.`, M, y + 2, { size: 8, color: RC.muted }); y += 7;
+    const cwid = (CW - 8) / 2, chh = 46;
+    gp.forEach((p, i) => {
+      if (i % 2 === 0 && y + chh > BOT) { d.addPage(); y = TOP; }
+      meterBars(d, M + (i % 2) * (cwid + 8), y, cwid, chh - 4, p, dates);
+      if (i % 2 === 1) y += chh;
+    });
+  }
+}
+async function makeXlsx(ins) {
+  if (!ins) return;
+  const tpl = TPL[ins.templateId], m = meterModel(tpl), { pts, dates } = m;
+  if (!dates.length) { toast('Ingen avlesninger å lage Excel av ennå', 3500); return; }
+  const X = XLSX, n = dates.length, qM = X.q('Målerstand'), qF = X.q('Forbruk'), qS = X.q('Snitt');
+  const hdr = t => ({ v: t, s: 1 });
+  // Målerstand: én rad per avlesning, eldste øverst. Netto er formler (varmtvann minus sirkulasjon).
+  const c0 = new Map(pts.map((p, i) => [p.key, i + 1]));
+  const rowsM = [[hdr('Dato'), ...pts.map(p => hdr(p.calc ? p.title : p.label))]];
+  dates.forEach((dt, r) => rowsM.push([{ v: X.serial(dt), s: 2 }, ...pts.map((p, ci) => {
+    const v = p.vals[r];
+    if (p.calc) { const a = c0.get(p.calc.a), mi = c0.get(p.calc.minus); return v == null ? null : { f: `${X.col(a)}${r + 2}-N(${X.col(mi)}${r + 2})`, v, s: 8 }; }
+    return v == null ? null : { v, s: 3 };
+  })]));
+  const sheetM = { name: 'Målerstand', rows: rowsM, cols: [13, ...pts.map(() => 17)], freeze: { c: 1, r: 1 }, rowHeights: { 0: 54 } };
+  // Forbruk: formler mot Målerstand. Snitt nederst.
+  const rowsF = [[hdr('Avlesning'), ...pts.map(p => hdr(p.calc ? p.title : p.label))]];
+  for (let r = 1; r < n; r++) rowsF.push([{ f: `${qM}!A${r + 2}`, v: X.serial(dates[r]), s: 6 }, ...pts.map((p, ci) => {
+    const v = p.use[r]; if (v == null) return null; const L = X.col(ci + 1);
+    return { f: `IF(AND(ISNUMBER(${qM}!${L}${r + 2}),ISNUMBER(${qM}!${L}${r + 1})),${qM}!${L}${r + 2}-${qM}!${L}${r + 1},"")`, v, s: 3 };
+  })]);
+  if (n > 1) {
+    rowsF.push([]);
+    rowsF.push([{ v: 'Snitt', s: 5 }, ...pts.map((p, ci) => p.avg == null ? null : { f: `AVERAGE(${X.col(ci + 1)}2:${X.col(ci + 1)}${n})`, v: p.avg, s: 7 })]);
+  }
+  const sheetF = { name: 'Forbruk', rows: rowsF, cols: [13, ...pts.map(() => 17)], freeze: { c: 1, r: 1 }, rowHeights: { 0: 54 } };
+  const sheets = [sheetM, sheetF];
+  if (n > 1) {
+    const avgRow = n + 2;   // rad for Snitt i Forbruk (1-basert): header + (n-1) rader + tom rad + snitt
+    const gp = pts.map((p, ci) => ({ p, ci })).filter(x => x.p.graph);
+    // Snitt: samme snitt gjentatt per rad, slik at diagrammene kan tegne en snittlinje
+    const rowsS = [[hdr('Avlesning'), ...gp.map(x => hdr(x.p.calc ? x.p.title : x.p.label))]];
+    for (let r = 1; r < n; r++) rowsS.push([{ f: `${qF}!A${r + 1}`, v: X.serial(dates[r]), s: 6 }, ...gp.map(x => x.p.avg == null ? null : { f: `${qF}!$${X.col(x.ci + 1)}$${avgRow}`, v: x.p.avg, s: 4 })]);
+    const sheetS = { name: 'Snitt', rows: rowsS, cols: [13, ...gp.map(() => 17)], freeze: { c: 1, r: 1 }, rowHeights: { 0: 54 } };
+    const catF = `${qF}!$A$2:$A$${n}`, catV = dates.slice(1).map(X.serial);
+    const charts = gp.map((x, k) => ({
+      title: x.p.title, cat: { f: catF, vals: catV },
+      series: [
+        { name: 'Forbruk', f: `${qF}!$${X.col(x.ci + 1)}$2:$${X.col(x.ci + 1)}$${n}`, vals: x.p.use.slice(1), color: '058479', type: 'bar' },
+        { name: 'Snitt', f: `${qS}!$${X.col(k + 1)}$2:$${X.col(k + 1)}$${n}`, vals: x.p.use.slice(1).map(() => x.p.avg), color: 'C41E3A', type: 'line' },
+      ],
+      a: { c0: (k % 2) * 9, r0: 2 + Math.floor(k / 2) * 17, c1: (k % 2) * 9 + 8, r1: 2 + Math.floor(k / 2) * 17 + 16 },
+    }));
+    sheets.push({ name: 'Grafer', rows: [[{ v: 'Forbruk per måned med snitt (diagrammene bruker arkene Forbruk og Snitt)', s: 5 }]], cols: [], noGrid: true, charts });
+    sheets.push(sheetS);
+  }
+  const blob = XLSX.build({ sheets });
+  const name = `${tpl.name} målerstand og forbruk ${todayISO()}.xlsx`.replace(/[\\/:*?"<>|]/g, '');
+  S.ready_file = { file: new File([blob], name, { type: blob.type }), title: 'Excel-filen er klar' };
+  render();
 }
 function prevValue(ins, key) {
   if (TPL[ins.templateId]?.history) { const s = meterSeries(ins, key); return s.length ? s[s.length - 1].v : null; }
@@ -644,7 +786,8 @@ function renderIns() {
       <div class="row-btns"><button class="btn" data-act="finish-cancel">Gå tilbake</button><button class="btn primary" data-act="finish-force">Fullfør likevel</button></div>`;
   } else {
     h += `<button class="btn primary big" data-act="${ins.status === 'complete' ? 'pdf' : 'finish'}" data-id="${ins.id}" ${S.busy ? 'disabled' : ''}>${S.busy ? 'Lager PDF…' : ins.status === 'complete' ? 'Lag PDF på nytt' : ins.templateId === 'avvik' ? 'Send avvik' : 'Fullfør og lag PDF'}</button>`;
-    if (ins.status === 'complete' && tpl.mail) h += `<div class="row-btns"><button class="btn" data-act="mail-copy" data-id="${ins.id}">Kopier tabell til e-post</button><button class="btn" data-act="mail-open" data-id="${ins.id}">Åpne e-post</button></div>`;
+    if (ins.status === 'complete' && tpl.mail) h += `<div class="row-btns"><button class="btn" data-act="mail-copy" data-id="${ins.id}">Kopier tabell</button><button class="btn" data-act="mail-open" data-id="${ins.id}">Åpne e-post (kopierer tabellen)</button></div>`;
+    if (hasMeters(tpl) && tpl.history) h += `<div class="row-btns"><button class="btn" data-act="xlsx" data-id="${ins.id}">Lag Excel (målerstand, forbruk og grafer)</button></div>`;
   }
   h += '</section>';
   return h;
@@ -832,7 +975,8 @@ document.addEventListener('click', async e => {
     case 'finish-cancel': S.confirmFinish = false; render(); break;
     case 'pdf': await makePdf(S.ins[b.dataset.id]); break;
     case 'mail-copy': await mailCopy(S.ins[b.dataset.id]); break;
-    case 'mail-open': mailOpen(S.ins[b.dataset.id]); break;
+    case 'mail-open': await mailOpen(S.ins[b.dataset.id]); break;
+    case 'xlsx': await makeXlsx(S.ins[b.dataset.id]); break;
     case 'recent-pdf': await openRecentPdf(b.dataset.id); break;
     case 'open-file': openFile(); break;
     case 'share-file': shareFile(); break;
@@ -1222,6 +1366,8 @@ async function buildReport(ins) {
     }
     y += 3;
   }
+
+  if (hasMeters(tpl) && tpl.history) meterPages(d, meterModel(tpl, ins.date), { W, M, CW, TOP, BOT });
 
   // ----- Bilder (store, to og to) -----
   if (pc) {
