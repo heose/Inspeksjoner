@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-02 å15';
+const APP_VERSION = '2026-11-03 t1';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -39,11 +39,10 @@ const DB = {
   db: null,
   open() {
     return new Promise((res, rej) => {
-      const r = indexedDB.open('oseberg-inspeksjon', 1);
+      const r = indexedDB.open('oseberg-inspeksjon', 2);
       r.onupgradeneeded = () => {
         const d = r.result;
-        d.createObjectStore('inspections', { keyPath: 'id' });
-        d.createObjectStore('photos', { keyPath: 'id' });
+        for (const n of ['inspections', 'photos', 'hours']) if (!d.objectStoreNames.contains(n)) d.createObjectStore(n, { keyPath: 'id' });
       };
       r.onsuccess = () => { this.db = r.result; res(); };
       r.onerror = () => rej(r.error);
@@ -68,7 +67,7 @@ const DB = {
 
 const S = {
   inbox: null, ibEdit: {}, inboxPics: {},
-  ins: {}, cur: null, view: 'home', ready: false, error: null,
+  ins: {}, hours: {}, cur: null, view: 'home', ready: false, error: null,
   settings: { by: 'Henrik Oseberg', company: 'Oseberg Drift og Service' },
   pickKey: null, ready_file: null, confirmFinish: false, showAllHist: false, showSettings: false, busy: false,
 };
@@ -526,6 +525,9 @@ function render() {
   } else if (S.view === 'inbox' && S.ready) {
     bar.innerHTML = `<button class="back" data-act="home-root" aria-label="Tilbake til oversikten">‹ Oversikt</button><div class="bar-title">Innmeldinger</div><div class="bar-status"></div>`;
     app.innerHTML = renderInbox();
+  } else if (S.view === 'hours' && S.ready) {
+    bar.innerHTML = `<button class="back" data-act="home-root" aria-label="Tilbake til oversikten">‹ Oversikt</button><div class="bar-title">Timer</div><div class="bar-status"></div>`;
+    app.innerHTML = hMonthHTML();
   } else if (S.view === 'links' && S.ready) {
     bar.innerHTML = `<button class="back" data-act="home-root" aria-label="Tilbake til oversikten">‹ Oversikt</button><div class="bar-title">Del lenker</div><div class="bar-status"></div>`;
     app.innerHTML = renderLinks();
@@ -617,6 +619,7 @@ function renderHome() {
   }
   { const nNy = (S.inbox || []).filter(x => x.status === 'ny').length;
     if (nNy) h += `<button class="btn inbox-card" data-act="inbox-open"><span class="inbox-n">${nNy}</span><span>${nNy === 1 ? 'Ny innmelding' : 'Nye innmeldinger'} fra eksterne venter på godkjenning</span><span class="chev" aria-hidden="true">›</span></button>`; }
+  h += hHomeHTML();
   h += `<button class="btn avvik-big" data-act="avvik-new">Meld avvik</button>`;
   h += `<button class="btn linkbtn" data-act="links-open"><span>Del lenker og skjema</span><span class="chev" aria-hidden="true">›</span></button>`;
   h += `<section><h2 class="h2">Velg bygg</h2><div class="list">${SITES.map(site => {
@@ -864,6 +867,8 @@ async function hydratePhotos() {
 /* ---------- Ark for deling (må startes av et trykk) ---------- */
 function renderSheet() {
   const el = $('#sheet');
+  if (S.hSheet) { if (el.dataset.hs !== '1') hRenderSheet(); return; }   // timeark: tegnes bare på nytt av hours.js
+  el.dataset.hs = '';
   if (!S.ready_file) { el.hidden = true; el.innerHTML = ''; return; }
   el.hidden = false;
   el.innerHTML = `<div class="sheet-card" role="dialog" aria-label="Fil klar"><p class="sheet-title">${esc(S.ready_file.title)}</p><p class="muted small">${esc(S.ready_file.file.name)}</p>
@@ -891,6 +896,7 @@ async function shareFile() {
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const act = b.dataset.act, key = b.dataset.key, ins = cur();
+  if (act.startsWith('h-') || act.startsWith('hs-')) { await hClick(act, b); return; }   // timeliste (hours.js)
   switch (act) {
     case 'home': goHome(); break;
     case 'home-root': goHome(true); break;
@@ -1028,6 +1034,7 @@ function arm(b, label) {
 
 document.addEventListener('input', e => {
   const el = e.target; const ins = cur();
+  if (el.closest('[data-hours]')) { hInput(el, 'input'); return; }
   if (el.dataset.trello) { const t = S.settings.trello; t[el.dataset.trello] = el.value.trim(); t.members = null; saveSettings(); return; }
   if (el.dataset.ib) { (S.ibEdit[el.dataset.id] ||= {})[el.dataset.ib] = el.value; return; }
   if (el.dataset.lk) { const l = (S.linkDraft || []).find(x => x.id === el.dataset.id); if (l) l[el.dataset.lk] = el.value; return; }
@@ -1054,18 +1061,19 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('change', e => {
   const el = e.target; const ins = cur();
+  if (el.closest('[data-hours]')) { hInput(el, 'change'); return; }
   if (el.dataset.rdone) { toggleRemoteAct(el.dataset.rdone, el.checked); return; }
   if (el.dataset.hdone) {
     const [iid, key, id] = el.dataset.hdone.split('|'); const i = S.ins[iid];
     const act = (i?.answers[key]?.actions || []).find(x => x.id === id);
-    if (act) { act.done = el.checked; act.upd = Date.now(); act.doneBy = el.checked ? (S.settings.by || '') : ''; touch(i); toast('Handlingen er merket som utført'); setTimeout(render, 350); setTimeout(syncTrello, 1200); setTimeout(hubSync, 2000); }
+    if (act) { act.done = el.checked; act.upd = Date.now(); act.doneBy = el.checked ? (S.settings.by || '') : ''; touch(i); toast('Handlingen er merket som utført'); setTimeout(render, 350); setTimeout(syncTrello, 1200); setTimeout(hubSync, 2000); setTimeout(hoursFlushComments, 1500); }
     return;
   }
   if (!ins) return;
   if (el.dataset.actf && el.type === 'checkbox') {
     const [key, id] = el.dataset.actf.split('|');
     const act = (ins.answers[key]?.actions || []).find(x => x.id === id);
-    if (act) { act.done = el.checked; act.upd = Date.now(); act.doneBy = el.checked ? (S.settings.by || '') : ''; touch(ins); render(); }
+    if (act) { act.done = el.checked; act.upd = Date.now(); act.doneBy = el.checked ? (S.settings.by || '') : ''; touch(ins); render(); setTimeout(hoursFlushComments, 1500); }
   } else if (el.dataset.rerender || el.dataset.avf === 'anl') render();
 });
 
@@ -1404,7 +1412,7 @@ async function exportBackup() {
   await flushAll();
   const photos = [];
   for (const p of await DB.all('photos')) photos.push({ id: p.id, w: p.w, h: p.h, data: await blobToB64(p.blob) });
-  const data = { app: 'oseberg-inspeksjon', version: 1, exportedAt: new Date().toISOString(), settings: { ...S.settings, trello: undefined, hub: undefined }, inspections: await DB.all('inspections'), photos };
+  const data = { app: 'oseberg-inspeksjon', version: 1, exportedAt: new Date().toISOString(), settings: { ...S.settings, trello: undefined, hub: undefined }, inspections: await DB.all('inspections'), hours: await DB.all('hours'), photos };
   const file = new File([JSON.stringify(data)], `inspeksjoner-sikkerhetskopi-${todayISO()}.json`, { type: 'application/json' });
   S.settings.lastBackup = todayISO(); saveSettings();
   S.ready_file = { file, title: 'Sikkerhetskopien er klar' };
@@ -1425,7 +1433,16 @@ $('#importpick').addEventListener('change', async e => {
       const mine = S.ins[i.id];
       if (!mine || (i.updatedAt || 0) > (mine.updatedAt || 0)) { S.ins[i.id] = i; await DB.put('inspections', i); added++; }
     }
-    render(); toast(`Gjenopprettet ${added} inspeksjoner`);
+    let addedH = 0;
+    for (const h of data.hours || []) {
+      const mine = S.hours[h.id];
+      if (!mine || (h.updatedAt || 0) > (mine.updatedAt || 0)) { S.hours[h.id] = h; await DB.put('hours', h); addedH++; }
+    }
+    if (data.settings) {   // mottakerlister og bygge-posisjoner følger sikkerhetskopien, men skriver ikke over det som finnes
+      S.settings.recip = { ...(data.settings.recip || {}), ...(S.settings.recip || {}) };
+      S.settings.geo = { ...(data.settings.geo || {}), ...(S.settings.geo || {}) }; saveSettings();
+    }
+    render(); toast(`Gjenopprettet ${added} inspeksjoner` + (addedH ? ` og ${addedH} timeføringer` : ''));
   } catch (err) { toast('Kunne ikke gjenopprette: ' + err.message, 5000); }
 });
 
@@ -1568,6 +1585,7 @@ async function syncTrello(manual) {
   } catch (e) { err = e; }
   S.syncing = false;
   await flushAll();
+  hoursFlushComments();   // timer-kommentar på kort som er lukket (også de som ble lukket i Trello)
   S.trErr = err ? (err.status || /fetch|load failed|network/i.test(err.message || '') ? trelloErr(err) : 'Feil i appen: ' + (err.message || err)) : null;
   if (err) { console.error(err); if (err.status || manual === true) toast(S.trErr, 8000); }
   else if (sent || closed) toast([sent ? `${sent} ${sent === 1 ? 'handling' : 'handlinger'} sendt til Trello` : '', closed ? `${closed} lukket i Trello` : ''].filter(Boolean).join(' · '));
@@ -1639,7 +1657,7 @@ async function toggleRemoteAct(id, checked) {
   r.done = checked; r.doneBy = checked ? (S.settings.by || '') : ''; r.doneAt = checked ? todayISO() : ''; r.upd = Date.now(); r.dirty = true; openCache = null; persistActs();
   toast(checked ? 'Handlingen er merket som utført' : 'Handlingen er åpnet igjen'); setTimeout(render, 350);
   try { if (r.tr?.id && r.due && trelloCfg() && navigator.onLine) await tfetch('PUT', `cards/${r.tr.id}`, { dueComplete: checked ? 'true' : 'false' }); } catch (e) {}
-  setTimeout(hubSync, 800);
+  setTimeout(hubSync, 800); setTimeout(hoursFlushComments, 1500);
 }
 /* Hvilke anlegg/kontroller en inspeksjon dekker. Sendes til Hub, slik at alle telefoner ser hva som er utført. */
 function covKeys(i) {
@@ -1939,6 +1957,7 @@ async function openRecentPdf(id) {
   try {
     await DB.open();
     for (const i of await DB.all('inspections')) S.ins[i.id] = i;
+    for (const h of await DB.all('hours')) S.hours[h.id] = h;
     S.ready = true;
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   } catch (e) {

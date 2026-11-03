@@ -32,6 +32,7 @@ const TR_ALLOW = [
   ['GET', new RegExp(`^cards/${ID}$`)],
   ['PUT', new RegExp(`^cards/${ID}$`)],
   ['POST', new RegExp(`^cards/${ID}/attachments$`)],
+  ['POST', new RegExp(`^cards/${ID}/actions/comments$`)],   // timer-kommentar når en koblet handling lukkes
 ];
 
 // ---------- Ekstern innmelding (åpen, uten kode, men med robotsjekk og grenser) ----------
