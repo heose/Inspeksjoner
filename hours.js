@@ -18,6 +18,28 @@ const hParse = (d, t) => new Date(`${d}T${t}:00`).getTime();
 const hSiteOf = id => SITES.find(s => s.id === id);
 const hKindLabel = k => k === 'tillegg' ? 'Tillegg' : 'Fast avtale';
 const hSave = e => { e.updatedAt = Date.now(); return DB.put('hours', clone(e)).catch(err => toast('Kunne ikke lagre timer: ' + (err && err.message || err), 5000)); };
+/* ---------- Oppgaver (Trello-kort/handlinger) per føring: flervalg, fordeling i halvtimer ---------- */
+const hLinks = e => Array.isArray(e.links) ? e.links : (e.link && e.link.id ? [e.link] : []);
+function hLsDefault(links, u) {
+  const n = links.length, out = {};
+  links.forEach((l, i) => { out[l.id] = n ? Math.floor(u / n) + (i < u % n ? 1 : 0) : 0; });
+  return out;
+}
+function hLsNorm(links, lsp, u) {
+  const def = hLsDefault(links, u), out = {}; let left = u;
+  for (const l of links) { const v = lsp && l.id in lsp ? Math.max(0, Math.min(lsp[l.id] || 0, left)) : def[l.id]; out[l.id] = v; left -= v; }
+  return out;
+}
+function hLsFrac(e, links) {   // andel av økten per oppgave, 0..1
+  const u = hUnits(hMin(e)), sp = e.lsplit, f = {};
+  const useSp = sp && links.every(l => l.id in sp);
+  for (const l of links) f[l.id] = !u ? 0 : useSp ? Math.min(1, (sp[l.id] || 0) / u) : 1 / links.length;
+  return f;
+}
+function hPool(siteId) {   // valgbare oppgaver for bygget: åpne Trello-kort hvis lastet, ellers lokale handlinger
+  const trc = ((S.hTr || {})[siteId] || {}).cards;
+  return trc ? trc.map(c => ({ id: c.id, text: c.text, src: 'trello' })) : openAll().filter(x => x.siteId === siteId).map(x => ({ id: x.id, text: x.text, src: 'local' }));
+}
 const hTrunc = (s, n = 60) => { s = String(s || '').split('\n')[0]; return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 
 /* ---------- Mottakere (fakturamottakere) per bygg ---------- */
@@ -79,7 +101,7 @@ function hStop() {
 
 /* ---------- Skjema (ark) for stopp, redigering og manuell føring ---------- */
 function hOpenSheet(e, manual) {
-  S.hSheet = { id: e.id, manual: !!manual, newr: '', d: { date: hDay(e.start), from: hHHMM(e.start), to: hHHMM(e.end), siteId: e.siteId, text: e.text || '', men: e.men || 1, kind: e.kind || 'fast', link: e.link || null, split: { ...(e.split || {}) }, other: e.other || '' } };
+  S.hSheet = { id: e.id, manual: !!manual, newr: '', d: { date: hDay(e.start), from: hHHMM(e.start), to: hHHMM(e.end), siteId: e.siteId, text: e.text || '', men: e.men || 1, kind: e.kind || 'fast', links: hLinks(e).map(l => ({ ...l })), lsplit: hLsNorm(hLinks(e), e.lsplit, hUnits(hMin(e))), split: { ...(e.split || {}) }, other: e.other || '' } };
   hRenderSheet();
 }
 function hNewManual() {
@@ -97,9 +119,9 @@ function hSheetHTML() {
   const sh = S.hSheet, d = sh.d, min = hSheetMin(d), u = hUnits(min);
   let left = u; for (const n of Object.keys(d.split)) { d.split[n] = Math.max(0, Math.min(d.split[n], left)); left -= d.split[n]; }
   const names = [...hRecips(d.siteId), 'Annet'];
-  const trc = ((S.hTr || {})[d.siteId] || {}).cards;
-  const acts = trc ? trc.slice() : openAll().filter(x => x.siteId === d.siteId);
-  if (d.link && !acts.some(x => x.id === d.link.id)) acts.unshift({ id: d.link.id, text: d.link.text });
+  const pool = hPool(d.siteId), trc = ((S.hTr || {})[d.siteId] || {}).cards;
+  for (const l of d.links) if (!pool.some(x => x.id === l.id)) pool.unshift({ id: l.id, text: l.text, src: l.src });
+  d.lsplit = hLsNorm(d.links, d.lsplit, u);
   const seg = (arr, on, act, key) => arr.map(([id, label]) => `<button type="button" ${on(id) ? 'data-tone="sel"' : ''} aria-pressed="${on(id)}" data-act="${act}" data-id="${esc(id)}">${esc(label)}</button>`).join('');
   const rows = names.map(n => {
     const v = d.split[n] || 0;
@@ -117,7 +139,10 @@ function hSheetHTML() {
     <label class="fld"><span>Oppdrag</span><input class="inp" data-hs="text" placeholder="F.eks. bytte lyspærer trapp 2" value="${esc(d.text)}" autocomplete="off"></label>
     <div class="hs-line"><span class="hs-n">Antall mann</span><div class="numrow"><button type="button" class="btn" data-act="hs-men" data-d="-1" aria-label="Færre">−</button><b class="hs-men">${d.men}</b><button type="button" class="btn" data-act="hs-men" data-d="1" aria-label="Flere">+</button></div></div>
     <div class="seg" role="group" aria-label="Type">${seg([['fast', 'Fast avtale'], ['tillegg', 'Tillegg']], id => id === d.kind, 'hs-kind')}</div>
-    <label class="fld"><span>Knytt til handling (valgfritt)${trc ? ' · åpne kort i Trello-listen' : ''}</span><select class="inp" data-hs="link"><option value="">Ingen</option>${acts.map(x => `<option value="${esc(x.id)}"${d.link && d.link.id === x.id ? ' selected' : ''}>${esc(hTrunc(x.text) || '(uten beskrivelse)')}</option>`).join('')}</select></label>
+    <fieldset class="hs-tasks"><legend>Knytt til oppgaver (valgfritt)${trc ? ' · åpne kort i Trello-listen' : ''}</legend>
+      ${pool.length ? pool.map(x => `<label class="hs-chk"><input type="checkbox" data-hlink="${esc(x.id)}"${d.links.some(l => l.id === x.id) ? ' checked' : ''}> <span>${esc(hTrunc(x.text, 70) || '(uten beskrivelse)')}</span></label>`).join('') : `<p class="muted small">${trc ? 'Ingen åpne kort i listen for dette bygget.' : 'Ingen åpne handlinger for dette bygget.'}</p>`}
+    </fieldset>
+    ${d.links.length ? `<h3 class="h3">Fordeling på oppgaver</h3><p class="muted small">Timene fordeles på valgte oppgaver. Hver oppgave får kommentar med sin andel.</p>${d.links.map(l => `<div class="hs-row"><span class="hs-n">${esc(hTrunc(l.text, 40))}</span><input type="range" min="0" max="${u}" step="1" value="${d.lsplit[l.id] || 0}" data-hlsplit="${esc(l.id)}" aria-label="Timer til oppgaven"${u ? '' : ' disabled'}><b>${hTxt(d.lsplit[l.id] || 0)} t</b></div>`).join('')}<div class="hs-rest">Ikke fordelt på oppgave <b id="hs-lrest">${hTxt(u - d.links.reduce((a, l) => a + (d.lsplit[l.id] || 0), 0))} t</b></div>` : ''}
     <h3 class="h3">Fordeling på mottakere</h3>
     <p class="muted small">Del økten på hvem som skal faktureres. Det som ikke er fordelt blir stående som «Ikke fordelt».</p>
     ${rows}
@@ -136,9 +161,10 @@ async function hSaveSheet() {
   const split = {}; let left = u;
   for (const [n, v] of Object.entries(d.split)) { const x = Math.max(0, Math.min(v, left)); if (x) { split[n] = x; left -= x; } }
   const e = S.hours[sh.id] || { id: sh.id, user: S.settings.by, createdAt: Date.now() };
-  const relink = !(e.link && d.link && e.link.id === d.link.id);
-  Object.assign(e, { siteId: d.siteId, text: d.text.trim(), start, end, men: d.men, kind: d.kind, link: d.link, split, other: split.Annet ? d.other.trim() : '' });
-  if (relink) delete e.cmtAt;
+  const links = d.links.map(l => ({ ...l })), lsplit = hLsNorm(links, d.lsplit, u);
+  const oldIds = hLinks(e).map(l => l.id).sort().join('|'), newIds = links.map(l => l.id).sort();
+  Object.assign(e, { siteId: d.siteId, text: d.text.trim(), start, end, men: d.men, kind: d.kind, links, lsplit, link: links[0] || null, split, other: split.Annet ? d.other.trim() : '' });
+  if (oldIds !== newIds.join('|')) { delete e.cmtAt; e.cmtDone = Object.fromEntries(Object.entries(e.cmtDone || {}).filter(([k]) => newIds.includes(k))); }
   S.hours[e.id] = e;
   Object.assign(S.settings, { hLastSite: d.siteId, hMen: d.men, hKind: d.kind }); saveSettings();
   await hSave(e);
@@ -187,6 +213,7 @@ function hTotals(groups) {
 function hHomeHTML() {
   if (!SITES.length || !S.settings.timer) return '';
   const run = hRunning(), today = todayISO(), ym = today.slice(0, 7), gs = hGroups(ym);
+  if (S.hTasksOpen) hEnsureTr((run || { siteId: S.hPick || S.settings.hLastSite || SITES[0].id }).siteId);
   const tu = gs.filter(g => g.day === today).reduce((a, g) => a + g.units, 0), mu = gs.reduce((a, g) => a + g.units, 0);
   const pick = run ? run.siteId : (S.hPick || S.settings.hLastSite || SITES[0].id), site = hSiteOf(pick) || SITES[0];
   const segs = SITES.map(s => `<button type="button" ${s.id === pick ? 'data-tone="sel"' : ''} aria-pressed="${s.id === pick}" data-act="h-site" data-id="${s.id}">${esc(s.short)}</button>`).join('');
@@ -195,12 +222,20 @@ function hHomeHTML() {
     h += `<div class="hrs-run"><span class="hrs-dot" aria-hidden="true"></span><b id="h-el" class="hrs-el">${hClock(hMin(run))}</b><span class="muted small">siden ${hHHMM(run.start)}</span></div>
       <input class="inp" data-hrun="text" placeholder="Hva gjør du? (kan fylles ut ved stopp)" value="${esc(run.text)}" autocomplete="off">
       <div class="seg" role="group" aria-label="Bygg">${segs}</div>
+      <button type="button" class="btn hrs-tbtn" data-act="h-tasks" aria-expanded="${!!S.hTasksOpen}">Knytt til oppgave${hLinks(run).length ? ' (' + hLinks(run).length + ')' : ''}</button>
+      ${S.hTasksOpen ? hTaskPickHTML(run) : ''}
       <button type="button" class="btn primary big hrs-go stop" data-act="h-stop">Stopp</button>
       <button type="button" class="link danger" data-act="h-cancel">Forkast timeren</button>`;
   } else {
     h += `<div class="seg" role="group" aria-label="Bygg">${segs}</div><button type="button" class="btn primary big hrs-go" data-act="h-start">Start</button>`;
   }
   return h + `<div class="hrs-foot"><button type="button" class="link" data-act="h-open">Månedsoversikt ›</button><button type="button" class="link" data-act="h-geo">${hGeoOf(site) ? 'Oppdater' : 'Lagre'} posisjon for ${esc(site.short)}</button></div></section>`;
+}
+function hTaskPickHTML(run) {
+  const pool = hPool(run.siteId), on = new Set(hLinks(run).map(l => l.id));
+  for (const l of hLinks(run)) if (!pool.some(x => x.id === l.id)) pool.unshift({ id: l.id, text: l.text, src: l.src });
+  const loaded = ((S.hTr || {})[run.siteId] || {}).cards;
+  return `<div class="hrs-pick">${pool.length ? pool.map(x => `<label class="hs-chk"><input type="checkbox" data-hrlink="${esc(x.id)}"${on.has(x.id) ? ' checked' : ''}> <span>${esc(hTrunc(x.text, 70) || '(uten beskrivelse)')}</span></label>`).join('') : `<p class="muted small">${loaded === undefined ? 'Henter kort fra Trello…' : 'Ingen åpne kort i listen for dette bygget.'}</p>`}</div>`;
 }
 function hMonthHTML() {
   const ym = S.hMonth || todayISO().slice(0, 7), [y, mo] = ym.split('-').map(Number), gs = hGroups(ym), tot = hTotals(gs);
@@ -221,7 +256,7 @@ function hMonthHTML() {
       return `<div class="mrow"><span class="rc-title">${esc(g.text || '(uten beskrivelse)')}</span><span class="rc-sub">${fmt(g.day)} · ${esc(hSiteOf(g.siteId)?.short || '')} · <b>${hTxt(g.units)} t</b> · ${hKindLabel(g.kind)}${g.men > 1 ? ' · ' + g.men + ' mann' : ''}</span>${cats ? `<span class="rc-sub">${cats}</span>` : ''}${g.others.length ? `<span class="rc-sub">Annet: ${esc(g.others.join('; '))}</span>` : ''}</div>`;
     }).join('')}</div></section>
     <section><h2 class="h2">Føringer <span class="count">${ents.length}</span></h2><div class="list">${ents.map(e => `<div class="row-card"><button type="button" class="row-main" data-act="h-edit" data-id="${e.id}">
-      <span class="rc-title">${esc(e.text || '(uten beskrivelse)')}</span><span class="rc-sub">${fmt(hDay(e.start))} · ${hHHMM(e.start)}–${hHHMM(e.end)} · ${hClock(hMin(e))} · ${esc(hSiteOf(e.siteId)?.short || '')}${(e.men || 1) > 1 ? ' · ' + e.men + ' mann' : ''}${e.link ? ' · koblet til handling' : ''}</span></button></div>`).join('')}</div></section>`;
+      <span class="rc-title">${esc(e.text || '(uten beskrivelse)')}</span><span class="rc-sub">${fmt(hDay(e.start))} · ${hHHMM(e.start)}–${hHHMM(e.end)} · ${hClock(hMin(e))} · ${esc(hSiteOf(e.siteId)?.short || '')}${(e.men || 1) > 1 ? ' · ' + e.men + ' mann' : ''}${hLinks(e).length ? ' · ' + hLinks(e).length + ' oppgave(r)' : ''}</span></button></div>`).join('')}</div></section>`;
   }
   return h;
 }
@@ -238,7 +273,7 @@ function hExcel(ym) {
   for (const g of [...gs].reverse()) for (const [cat, u] of Object.entries(g.cat)) det.push([{ v: X.serial(g.day), s: 2 }, siteName(g.siteId), g.text || '(uten beskrivelse)', cat, hKindLabel(g.kind), { v: u / 2, s: 4 }, cat === 'Annet' ? g.others.join('; ') : '']);
   const raw = [[hdr('Dato'), hdr('Fra'), hdr('Til'), hdr('Minutter'), hdr('Mann'), hdr('Bygg'), hdr('Oppdrag'), hdr('Type'), hdr('Bruker'), hdr('Koblet handling')]];
   for (const e of hList().filter(e => e.end && hDay(e.start).startsWith(ym)).sort((a, b) => a.start - b.start))
-    raw.push([{ v: X.serial(hDay(e.start)), s: 2 }, hHHMM(e.start), hHHMM(e.end), { v: hMin(e), s: 3 }, { v: e.men || 1, s: 3 }, siteName(e.siteId), e.text || '', hKindLabel(e.kind), e.user || '', e.link ? e.link.text || '' : '']);
+    raw.push([{ v: X.serial(hDay(e.start)), s: 2 }, hHHMM(e.start), hHHMM(e.end), { v: hMin(e), s: 3 }, { v: e.men || 1, s: 3 }, siteName(e.siteId), e.text || '', hKindLabel(e.kind), e.user || '', hLinks(e).map(l => l.text).join('; ')]);
   const blob = XLSX.build({ sheets: [
     { name: 'Oppsummering', rows: sum, cols: [26, 26, 16, 14, 12], freeze: { c: 0, r: 1 } },
     { name: 'Fakturagrunnlag', rows: det, cols: [12, 24, 40, 24, 14, 10, 30], freeze: { c: 0, r: 1 } },
@@ -268,30 +303,37 @@ async function hLoadTr(siteId) {
   } catch (e) { T[siteId] = { at: Date.now(), cards: null }; }
   hTrBusy[siteId] = false;
   if (S.hSheet && S.hSheet.d.siteId === siteId) hRenderSheet();
+  else if (hRunning() && hRunning().siteId === siteId && S.hTasksOpen) render();
 }
 function hEnsureTr(siteId) {
   const c = ((S.hTr || {})[siteId]);
   if (trelloCfg() && hTrList(siteId) && (!c || Date.now() - c.at > 120e3)) hLoadTr(siteId);
 }
-async function hPostCmt(cardId, es) {
-  const pm = es.reduce((a, e) => a + hMin(e) * (e.men || 1), 0), men = Math.max(...es.map(e => e.men || 1));
+async function hPostCmt(cardId, items) {   // items: [{e, f, cid}] der f er oppgavens andel av føringen
+  const pm = items.reduce((a, x) => a + hMin(x.e) * (x.e.men || 1) * x.f, 0), men = Math.max(...items.map(x => x.e.men || 1));
   await tfetch('POST', `cards/${cardId}/actions/comments`, { text: `Timer ført i Argus: ${hTxt(hUnits(pm))} timer, ${men} mann` });
-  for (const e of es) { e.cmtAt = Date.now(); await hSave(e); }
+  for (const x of items) { x.e.cmtDone = { ...(x.e.cmtDone || {}), [x.cid]: Date.now() }; await hSave(x.e); }
 }
 async function hoursFlushComments() {
   if (S.hFlushing || !trelloCfg() || !navigator.onLine) return;
-  const by = {}, byCard = {};
-  for (const e of hList()) if (e.end && e.link && e.link.id && !e.cmtAt) (e.link.src === 'trello' ? (byCard[e.link.id] ||= []) : (by[e.link.id] ||= [])).push(e);
+  const byCard = {};
+  for (const e of hList()) {
+    if (!e.end || e.cmtAt) continue;   // cmtAt: gammel føring som allerede er kommentert
+    const ls = hLinks(e); if (!ls.length) continue;
+    const f = hLsFrac(e, ls);
+    for (const l of ls) if (f[l.id] > 0 && !(e.cmtDone || {})[l.id]) (byCard[l.id] ||= { src: l.src, items: [] }).items.push({ e, f: f[l.id], cid: l.id });
+  }
   S.hFlushing = true;
   try {
-    for (const [cid, es] of Object.entries(byCard)) {
-      let c; try { c = await tfetch('GET', `cards/${cid}`, { fields: 'closed,idList' }); } catch (err) { if (err.status === 404) continue; throw err; }
-      if (!(c.closed || c.idList === TRELLO.done)) continue;
-      await hPostCmt(cid, es);
-    }
-    for (const [aid, es] of Object.entries(by)) {
-      const st = hActState(aid); if (!st || !st.done || !st.card) continue;
-      await hPostCmt(st.card, es);
+    for (const [lid, g] of Object.entries(byCard)) {
+      let cardId = null;
+      if (g.src === 'trello') {
+        let c; try { c = await tfetch('GET', `cards/${lid}`, { fields: 'closed,idList' }); } catch (err) { if (err.status === 404) continue; throw err; }
+        if (c.closed || c.idList === TRELLO.done) cardId = lid;
+      } else {
+        const st = hActState(lid); if (st && st.done && st.card) cardId = st.card;
+      }
+      if (cardId) await hPostCmt(cardId, g.items);
     }
   } catch (err) { console.warn('Timer-kommentar til Trello', err); }
   S.hFlushing = false;
@@ -319,7 +361,8 @@ async function hClick(act, b) {
     case 'h-new': hNewManual(); break;
     case 'h-edit': { const e = S.hours[b.dataset.id]; if (e && e.end) hOpenSheet(e, false); break; }
     case 'h-xlsx': hExcel(S.hMonth || todayISO().slice(0, 7)); break;
-    case 'hs-site': if (sh) { sh.d.siteId = b.dataset.id; sh.d.split = {}; sh.d.link = null; hRenderSheet(); } break;
+    case 'hs-site': if (sh) { sh.d.siteId = b.dataset.id; sh.d.split = {}; sh.d.links = []; sh.d.lsplit = {}; hRenderSheet(); } break;
+    case 'h-tasks': { S.hTasksOpen = !S.hTasksOpen; const r = hRunning(); if (S.hTasksOpen && r) hEnsureTr(r.siteId); render(); break; }
     case 'hs-kind': if (sh) { sh.d.kind = b.dataset.id; hRenderSheet(); } break;
     case 'hs-men': if (sh) { sh.d.men = Math.max(1, Math.min(9, sh.d.men + +b.dataset.d)); hRenderSheet(); } break;
     case 'hs-addr': {
@@ -346,8 +389,33 @@ function hInput(el, type) {
     const e = hRunning(); if (e) { e.text = el.value; clearTimeout(S.hTimer); S.hTimer = setTimeout(() => hSave(e), 400); }
     return;
   }
+  if (el.dataset.hrlink !== undefined) {   // oppgavevalg mens timeren går: lagres med en gang
+    const e = hRunning(); if (!e) return;
+    const id = el.dataset.hrlink, x = hPool(e.siteId).find(z => z.id === id) || hLinks(e).find(z => z.id === id);
+    const links = hLinks(e).filter(l => l.id !== id);
+    if (el.checked && x) links.push({ id: x.id, text: x.text, src: x.src });
+    e.links = links; e.link = links[0] || null; e.lsplit = hLsDefault(links, hUnits(hMin(e)));
+    hSave(e); render(); return;
+  }
   const sh = S.hSheet; if (!sh) return;
   const d = sh.d;
+  if (el.dataset.hlink !== undefined) {
+    if (type !== 'change') return;
+    const id = el.dataset.hlink, x = hPool(d.siteId).find(z => z.id === id);
+    d.links = d.links.filter(l => l.id !== id);
+    if (el.checked && x) d.links.push({ id: x.id, text: x.text, src: x.src });
+    d.lsplit = hLsDefault(d.links, hUnits(hSheetMin(d)));
+    hRenderSheet(); return;
+  }
+  if (el.dataset.hlsplit !== undefined) {
+    if (type !== 'input') return;
+    const u = hUnits(hSheetMin(d)), id = el.dataset.hlsplit;
+    const others = d.links.filter(l => l.id !== id).reduce((a, l) => a + (d.lsplit[l.id] || 0), 0);
+    const v = Math.max(0, Math.min(+el.value, u - others)); el.value = v; d.lsplit[id] = v;
+    const lab = el.parentElement.querySelector('b'); if (lab) lab.textContent = hTxt(v) + ' t';
+    const rest = $('#hs-lrest'); if (rest) rest.textContent = hTxt(u - others - v) + ' t';
+    return;
+  }
   if (el.dataset.hsplit !== undefined) {
     if (type !== 'input') return;
     const u = hUnits(hSheetMin(d)), n = el.dataset.hsplit;
@@ -363,14 +431,6 @@ function hInput(el, type) {
     case 'other': d.other = el.value; break;
     case 'newr': sh.newr = el.value; break;
     case 'date': case 'from': case 'to': if (type === 'change' && el.value) { d[el.dataset.hs] = el.value; hRenderSheet(); } break;
-    case 'link': if (type === 'change') {
-      const trc = ((S.hTr || {})[d.siteId] || {}).cards || [];
-      const trX = trc.find(z => z.id === el.value);
-      const x = trX || openAll().find(z => z.id === el.value);
-      d.link = x ? { id: x.id, text: x.text, src: trX ? 'trello' : 'local' } : null;
-      if (x && !d.text.trim()) d.text = String(x.text || '').split('\n')[0];
-      hRenderSheet();
-    } break;
   }
 }
 setInterval(() => { const r = typeof hRunning === 'function' && S && S.hours ? hRunning() : null, el = r && document.getElementById('h-el'); if (el) el.textContent = hClock(hMin(r)); }, 15000);
