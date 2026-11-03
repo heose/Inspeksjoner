@@ -1219,6 +1219,7 @@ async function buildReport(ins) {
   let nOk = 0;
   for (const x of items) { const a = ins.answers[x.key]; if (isQ(x) && CHOICE_TYPES.includes(x.it.type) && a?.value && toneFor(x.it, a.value) === 'ok') nOk++; }
 
+  const meterRep = hasMeters(tpl) && tpl.history;   // målerskjema: ingen punkt-ruter og ingen egen avlesningsliste, tabellen og grafene dekker det
   // ----- Topp -----
   d.rect(0, 0, W, 3.2, RC.acc);
   d.text((S.settings.company || '').toUpperCase(), M, 13, { size: 8, bold: true, color: RC.acc });
@@ -1231,13 +1232,13 @@ async function buildReport(ins) {
   y += 7;
   const tiles = [['Punkter', st.total, RC.ink], ['Ok', nOk, RC.ok], ['Avvik', st.flags, st.flags ? RC.bad : RC.ink], ['Handlinger', st.actions, st.actions ? RC.bad : RC.ink], ['Bilder', pc, RC.ink]];
   const tw = (CW - 4 * 3) / 5;
-  tiles.forEach(([lab, val, col], i) => {
+  if (!meterRep) tiles.forEach(([lab, val, col], i) => {
     const x = M + i * (tw + 3), warn = (lab === 'Avvik' || lab === 'Handlinger') && val > 0;
     d.rrect(x, y, tw, 17, 2.5, warn ? RC.badBg : RC.tint);
     d.text(String(val), x + 4, y + 9.2, { size: 17, bold: true, color: col });
     d.text(lab, x + 4, y + 14.2, { size: 8, color: RC.muted });
   });
-  y += 23;
+  y += meterRep ? 2 : 23;
 
   // ----- Krever oppfølging -----
   const hits = items.filter(x => isQ(x) && (isFlag(x.it, ins.answers[x.key]) || (ins.answers[x.key]?.actions || []).length));
@@ -1306,7 +1307,6 @@ async function buildReport(ins) {
     groups[groups.length - 1].rows.push(x);
   }
   let sn = 0;
-  const meterRep = hasMeters(tpl) && tpl.history;   // målerskjema: avlesningene vises i målerstand-tabellen, ikke som egen liste
   for (const g of groups) {
     if (meterRep || !g.rows.some(isQ)) continue;
     sn++; need(26); y += 1;
