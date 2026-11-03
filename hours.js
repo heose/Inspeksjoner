@@ -183,7 +183,7 @@ function hTotals(groups) {
 
 /* ---------- Visning ---------- */
 function hHomeHTML() {
-  if (!SITES.length) return '';
+  if (!SITES.length || !S.settings.timer) return '';
   const run = hRunning(), today = todayISO(), ym = today.slice(0, 7), gs = hGroups(ym);
   const tu = gs.filter(g => g.day === today).reduce((a, g) => a + g.units, 0), mu = gs.reduce((a, g) => a + g.units, 0);
   const pick = run ? run.siteId : (S.hPick || S.settings.hLastSite || SITES[0].id), site = hSiteOf(pick) || SITES[0];

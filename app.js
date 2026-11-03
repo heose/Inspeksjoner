@@ -591,6 +591,9 @@ function renderHome() {
       <label class="fld"><span>Hub-kode</span><input id="hub-code" type="password" data-hub="code" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(S.settings.hub.code || '')}"></label>
       <div class="row-btns"><button class="btn" data-act="hub-test">Test Hub</button><button class="btn" data-act="hub-sync">Oppdater nå</button></div>
       <p class="muted small">Innhold (sjekklister og anlegg): ${S.contentAt ? 'hentet fra Hub ' + new Date(S.contentAt).toLocaleDateString('nb-NO') : 'ikke hentet'}. <button class="link" data-act="content-upload">Last opp innholdsfil (administrator)</button></p>
+      <h3 class="h3">Timelogging (prøve)</h3>
+      <label class="fld"><span><input type="checkbox" data-tsw="1" ${S.settings.timer ? 'checked' : ''}> Vis Timer på forsiden</span></label>
+      <p class="muted small">Av som standard. Timene lagres bare på denne telefonen.</p>
       <h3 class="h3">Koder og lokale notater</h3>
       <p class="muted small">Lagres bare på denne telefonen. Vises øverst i sjekklisten, men kommer ikke med i PDF-en. Er med i sikkerhetskopien, så oppbevar den privat.</p>
       ${TEMPLATES.filter(t => !t.hidden).map(t => `<label class="fld"><span>${esc(t.name)}</span><textarea class="inp" id="ln-${t.id}" rows="2" data-lnote="${t.id}">${esc(S.settings.notes[t.id] || '')}</textarea></label>`).join('')}
@@ -1061,6 +1064,7 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('change', e => {
   const el = e.target; const ins = cur();
+  if (el.dataset.tsw) { S.settings.timer = el.checked; saveSettings(); render(); return; }
   if (el.closest('[data-hours]')) { hInput(el, 'change'); return; }
   if (el.dataset.rdone) { toggleRemoteAct(el.dataset.rdone, el.checked); return; }
   if (el.dataset.hdone) {
