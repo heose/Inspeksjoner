@@ -91,12 +91,14 @@ function hRenderSheet() {
   const el = $('#sheet'); if (!el) return;
   if (!S.hSheet) { el.dataset.hs = ''; el.hidden = !S.ready_file; if (!S.ready_file) el.innerHTML = ''; else renderSheet(); return; }
   el.dataset.hs = '1'; el.hidden = false; el.innerHTML = hSheetHTML();
+  hEnsureTr(S.hSheet.d.siteId);
 }
 function hSheetHTML() {
   const sh = S.hSheet, d = sh.d, min = hSheetMin(d), u = hUnits(min);
   let left = u; for (const n of Object.keys(d.split)) { d.split[n] = Math.max(0, Math.min(d.split[n], left)); left -= d.split[n]; }
   const names = [...hRecips(d.siteId), 'Annet'];
-  const acts = openAll().filter(x => x.siteId === d.siteId);
+  const trc = ((S.hTr || {})[d.siteId] || {}).cards;
+  const acts = trc ? trc.slice() : openAll().filter(x => x.siteId === d.siteId);
   if (d.link && !acts.some(x => x.id === d.link.id)) acts.unshift({ id: d.link.id, text: d.link.text });
   const seg = (arr, on, act, key) => arr.map(([id, label]) => `<button type="button" ${on(id) ? 'data-tone="sel"' : ''} aria-pressed="${on(id)}" data-act="${act}" data-id="${esc(id)}">${esc(label)}</button>`).join('');
   const rows = names.map(n => {
@@ -115,7 +117,7 @@ function hSheetHTML() {
     <label class="fld"><span>Oppdrag</span><input class="inp" data-hs="text" placeholder="F.eks. bytte lyspærer trapp 2" value="${esc(d.text)}" autocomplete="off"></label>
     <div class="hs-line"><span class="hs-n">Antall mann</span><div class="numrow"><button type="button" class="btn" data-act="hs-men" data-d="-1" aria-label="Færre">−</button><b class="hs-men">${d.men}</b><button type="button" class="btn" data-act="hs-men" data-d="1" aria-label="Flere">+</button></div></div>
     <div class="seg" role="group" aria-label="Type">${seg([['fast', 'Fast avtale'], ['tillegg', 'Tillegg']], id => id === d.kind, 'hs-kind')}</div>
-    <label class="fld"><span>Knytt til handling (valgfritt)</span><select class="inp" data-hs="link"><option value="">Ingen</option>${acts.map(x => `<option value="${esc(x.id)}"${d.link && d.link.id === x.id ? ' selected' : ''}>${esc(hTrunc(x.text) || '(uten beskrivelse)')}</option>`).join('')}</select></label>
+    <label class="fld"><span>Knytt til handling (valgfritt)${trc ? ' · åpne kort i Trello-listen' : ''}</span><select class="inp" data-hs="link"><option value="">Ingen</option>${acts.map(x => `<option value="${esc(x.id)}"${d.link && d.link.id === x.id ? ' selected' : ''}>${esc(hTrunc(x.text) || '(uten beskrivelse)')}</option>`).join('')}</select></label>
     <h3 class="h3">Fordeling på mottakere</h3>
     <p class="muted small">Del økten på hvem som skal faktureres. Det som ikke er fordelt blir stående som «Ikke fordelt».</p>
     ${rows}
@@ -253,17 +255,43 @@ function hActState(aid) {
   const r = (S.hubActs || {})[aid];
   return r ? { done: !!r.done, card: r.tr && r.tr.id } : null;
 }
+const hTrBusy = {};
+function hTrList(siteId) { const st = SITES.find(x => x.id === siteId); return st && TRELLO.lists ? TRELLO.lists[st.tl] : null; }
+async function hLoadTr(siteId) {
+  if (hTrBusy[siteId] || !trelloCfg() || !hTrList(siteId)) return;
+  hTrBusy[siteId] = true;
+  const T = (S.hTr ||= {});
+  try {
+    const lid = hTrList(siteId);
+    const all = await tfetch('GET', `boards/${TRELLO.board}/cards/all`, { fields: 'name,closed,idList' });
+    T[siteId] = { at: Date.now(), cards: all.filter(c => c.idList === lid && !c.closed && c.idList !== TRELLO.done).map(c => ({ id: c.id, text: c.name })) };
+  } catch (e) { T[siteId] = { at: Date.now(), cards: null }; }
+  hTrBusy[siteId] = false;
+  if (S.hSheet && S.hSheet.d.siteId === siteId) hRenderSheet();
+}
+function hEnsureTr(siteId) {
+  const c = ((S.hTr || {})[siteId]);
+  if (trelloCfg() && hTrList(siteId) && (!c || Date.now() - c.at > 120e3)) hLoadTr(siteId);
+}
+async function hPostCmt(cardId, es) {
+  const pm = es.reduce((a, e) => a + hMin(e) * (e.men || 1), 0), men = Math.max(...es.map(e => e.men || 1));
+  await tfetch('POST', `cards/${cardId}/actions/comments`, { text: `Timer ført i Argus: ${hTxt(hUnits(pm))} timer, ${men} mann` });
+  for (const e of es) { e.cmtAt = Date.now(); await hSave(e); }
+}
 async function hoursFlushComments() {
   if (S.hFlushing || !trelloCfg() || !navigator.onLine) return;
-  const by = {};
-  for (const e of hList()) if (e.end && e.link && e.link.id && !e.cmtAt) (by[e.link.id] ||= []).push(e);
+  const by = {}, byCard = {};
+  for (const e of hList()) if (e.end && e.link && e.link.id && !e.cmtAt) (e.link.src === 'trello' ? (byCard[e.link.id] ||= []) : (by[e.link.id] ||= [])).push(e);
   S.hFlushing = true;
   try {
+    for (const [cid, es] of Object.entries(byCard)) {
+      let c; try { c = await tfetch('GET', `cards/${cid}`, { fields: 'closed,idList' }); } catch (err) { if (err.status === 404) continue; throw err; }
+      if (!(c.closed || c.idList === TRELLO.done)) continue;
+      await hPostCmt(cid, es);
+    }
     for (const [aid, es] of Object.entries(by)) {
       const st = hActState(aid); if (!st || !st.done || !st.card) continue;
-      const pm = es.reduce((a, e) => a + hMin(e) * (e.men || 1), 0), men = Math.max(...es.map(e => e.men || 1));
-      await tfetch('POST', `cards/${st.card}/actions/comments`, { text: `Timer ført i Argus: ${hTxt(hUnits(pm))} timer, ${men} mann` });
-      for (const e of es) { e.cmtAt = Date.now(); await hSave(e); }
+      await hPostCmt(st.card, es);
     }
   } catch (err) { console.warn('Timer-kommentar til Trello', err); }
   S.hFlushing = false;
@@ -336,8 +364,10 @@ function hInput(el, type) {
     case 'newr': sh.newr = el.value; break;
     case 'date': case 'from': case 'to': if (type === 'change' && el.value) { d[el.dataset.hs] = el.value; hRenderSheet(); } break;
     case 'link': if (type === 'change') {
-      const x = openAll().find(z => z.id === el.value);
-      d.link = x ? { id: x.id, text: x.text } : null;
+      const trc = ((S.hTr || {})[d.siteId] || {}).cards || [];
+      const trX = trc.find(z => z.id === el.value);
+      const x = trX || openAll().find(z => z.id === el.value);
+      d.link = x ? { id: x.id, text: x.text, src: trX ? 'trello' : 'local' } : null;
       if (x && !d.text.trim()) d.text = String(x.text || '').split('\n')[0];
       hRenderSheet();
     } break;
