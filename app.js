@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-03 t2';
+const APP_VERSION = '2026-11-03 å16';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -280,30 +280,28 @@ function meterBars(d, x, y, w, h, p, dates) {
   const idx = []; for (let i = 1; i < dates.length; i++) idx.push(i);
   const sel = idx.slice(-18), vals = sel.map(i => p.use[i]);
   d.text(p.title, x, y + 3, { size: 8.5, bold: true, color: RC.ink });
-  if (p.avg != null) d.text('Snitt ' + nbsp(Math.round(p.avg * 10) / 10), x + w, y + 3, { size: 7.5, color: RC.muted, align: 'right' });
   const px = x + 9, py = y + 7, pw = w - 10, ph = h - 7 - 6, nv = vals.filter(v => v != null);
   if (!nv.length) { d.text('Ingen forbruk å vise ennå', px, py + ph / 2, { size: 8, color: RC.muted }); return; }
-  const hi = Math.max(1, ...nv, (p.avg || 0) * 1.15), lo = Math.min(0, ...nv), rng = hi - lo, Y = v => py + ph - (v - lo) / rng * ph, base = Y(0);
+  const hi = Math.max(1, ...nv), lo = Math.min(0, ...nv), rng = hi - lo, Y = v => py + ph - (v - lo) / rng * ph, base = Y(0);
   d.line(px, py, px + pw, py, RC.line, 0.15); d.line(px, base, px + pw, base, RC.muted, 0.25);
   d.text(nbsp(Math.round(hi)), px - 1.5, py + 2, { size: 6, color: RC.muted, align: 'right' }); d.text('0', px - 1.5, base + 1.5, { size: 6, color: RC.muted, align: 'right' });
   const slot = pw / sel.length, bw = Math.min(slot * 0.62, 9);
   sel.forEach((di, j) => {
     const v = p.use[di], cx = px + slot * (j + 0.5);
     if (v != null) {
-      const dev = p.avg ? v - p.avg : 0, odd = p.avg > 0 && Math.abs(dev) > p.avg * 0.3 && Math.abs(dev) >= 2;
-      const col = odd ? (dev > 0 ? RC.bad : RC.actLine) : RC.acc, t = Y(Math.max(v, 0)), b = Y(Math.min(v, 0));
+      const col = RC.acc, t = Y(Math.max(v, 0)), b = Y(Math.min(v, 0));
       d.rect(cx - bw / 2, t, bw, Math.max(b - t, 0.3), col);
-      if (slot >= 4.6) d.text(nbsp(Math.round(v * 10) / 10), cx, (v >= 0 ? t - 0.8 : base - 0.8), { size: 5.8, color: odd ? col : RC.muted, bold: odd, align: 'center' });
+      if (slot >= 4.6) d.text(nbsp(Math.round(v * 10) / 10), cx, (v >= 0 ? t - 0.8 : base - 0.8), { size: 5.8, color: RC.muted, align: 'center' });
     }
     if (slot >= 5.2 || j % 2 === 0) d.text(mon3(dates[di]), cx, py + ph + 3.6, { size: 6.2, color: RC.muted, align: 'center' });
   });
-  if (p.avg != null) { const ay = Y(p.avg); for (let xx = px; xx < px + pw; xx += 2.6) d.line(xx, ay, Math.min(xx + 1.5, px + pw), ay, RC.ink, 0.3); }
 }
 function meterPages(d, model, o) {
   const { pts, dates } = model, { W, M, CW, TOP, BOT } = o;
   if (dates.length < 1) return;
   const unit = (pts[0].unit || 'm³').replace('³', '3');
-  let y = TOP; d.addPage();
+  let y = o.y;
+  if (y + 70 > BOT) { d.addPage(); y = TOP; }
   d.text('Målerstand', M, y + 4, { size: 16, bold: true, color: RC.ink }); d.line(M, y + 8, W - M, y + 8, RC.acc, 0.35); y += 12;
   d.text(`Avlest stand (${unit}), nyeste måned først. Netto varmtvann = varmtvann minus sirkulasjon.`, M, y + 2, { size: 8.5, color: RC.muted }); y += 6;
   const desc = [...dates.keys()].reverse(), PER = 6, LW = 58, cw = (CW - LW) / PER, rh = 4.7;
@@ -327,7 +325,7 @@ function meterPages(d, model, o) {
   if (dates.length > 1 && gp.length) {
     d.addPage(); y = TOP;
     d.text('Forbruk per måned', M, y + 4, { size: 16, bold: true, color: RC.ink }); d.line(M, y + 8, W - M, y + 8, RC.acc, 0.35); y += 12;
-    d.text(`Forbruk (${unit}) = avlesning minus forrige avlesning. Stiplet linje = snitt. Rød søyle: over 30 % over snitt. Gul søyle: over 30 % under.`, M, y + 2, { size: 8, color: RC.muted }); y += 7;
+    d.text(`Forbruk (${unit}) = avlesning minus forrige avlesning.`, M, y + 2, { size: 8, color: RC.muted }); y += 7;
     const cwid = (CW - 8) / 2, chh = 46;
     gp.forEach((p, i) => {
       if (i % 2 === 0 && y + chh > BOT) { d.addPage(); y = TOP; }
@@ -340,7 +338,7 @@ async function makeXlsx(ins) {
   if (!ins) return;
   const tpl = TPL[ins.templateId], { pts, dates } = meterModel(tpl);
   if (!dates.length) { toast('Ingen avlesninger å lage Excel av ennå', 3500); return; }
-  const X = XLSX, n = dates.length, k = n - 1, qM = X.q('Målerstand'), qF = X.q('Forbruk'), qS = X.q('Snitt');
+  const X = XLSX, n = dates.length, k = n - 1, qM = X.q('Målerstand'), qF = X.q('Forbruk');
   const hdr = t => ({ v: t, s: 1 }), nm = p => p.calc ? p.title : p.label, di = j => n - 1 - j;   // kolonne j = nyeste først
   const rowOf = new Map(pts.map((p, i) => [p.key, i + 2]));
   // Målerstand: målernavn nedover, datoer på toppraden (nyeste til venstre). Netto er formler (varmtvann minus sirkulasjon).
@@ -353,28 +351,21 @@ async function makeXlsx(ins) {
   const widths = [46, ...dates.map(() => 12)];
   const sheets = [{ name: 'Målerstand', rows: rowsM, cols: widths, freeze: { c: 1, r: 1 } }];
   if (k > 0) {
-    // Forbruk: forskjell mot forrige avlesning (kolonnen til høyre), formler mot Målerstand. Snitt i siste kolonne.
-    const A = X.col(k + 1);
-    const rowsF = [[hdr('Måler'), ...Array.from({ length: k }, (_, j) => ({ f: `${qM}!${X.col(j + 1)}1`, v: X.serial(dates[di(j)]), s: 9 })), hdr('Snitt')]];
+    // Forbruk: forskjell mot forrige avlesning (kolonnen til høyre), formler mot Målerstand.
+    const rowsF = [[hdr('Måler'), ...Array.from({ length: k }, (_, j) => ({ f: `${qM}!${X.col(j + 1)}1`, v: X.serial(dates[di(j)]), s: 9 }))]];
     pts.forEach((p, r) => rowsF.push([{ v: nm(p), s: 5 }, ...Array.from({ length: k }, (_, j) => {
       const v = p.use[di(j)]; if (v == null) return null; const L = X.col(j + 1), P = X.col(j + 2), R = r + 2;
       return { f: `IF(AND(ISNUMBER(${qM}!${L}${R}),ISNUMBER(${qM}!${P}${R})),${qM}!${L}${R}-${qM}!${P}${R},"")`, v, s: 3 };
-    }), p.avg == null ? null : { f: `AVERAGE(B${r + 2}:${X.col(k)}${r + 2})`, v: p.avg, s: 7 }]));
-    sheets.push({ name: 'Forbruk', rows: rowsF, cols: [46, ...Array.from({ length: k }, () => 12), 12], freeze: { c: 1, r: 1 } });
+    })]));
+    sheets.push({ name: 'Forbruk', rows: rowsF, cols: [46, ...Array.from({ length: k }, () => 12)], freeze: { c: 1, r: 1 } });
     const gp = pts.map((p, r) => ({ p, r: r + 2 })).filter(x => x.p.graph);
-    const rowsS = [[hdr('Måler'), ...Array.from({ length: k }, (_, j) => ({ f: `${qM}!${X.col(j + 1)}1`, v: X.serial(dates[di(j)]), s: 9 }))]];
-    gp.forEach(x => rowsS.push([{ v: nm(x.p), s: 5 }, ...Array.from({ length: k }, () => x.p.avg == null ? null : { f: `${qF}!$${A}$${x.r}`, v: x.p.avg, s: 4 })]));
     const catV = Array.from({ length: k }, (_, j) => X.serial(dates[di(j)]));
     const charts = gp.map((x, g) => ({
       title: x.p.title, rev: true, cat: { f: `${qF}!$B$1:$${X.col(k)}$1`, vals: catV },
-      series: [
-        { name: 'Forbruk', f: `${qF}!$B$${x.r}:$${X.col(k)}$${x.r}`, vals: Array.from({ length: k }, (_, j) => x.p.use[di(j)]), color: '058479', type: 'bar' },
-        { name: 'Snitt', f: `${qS}!$B$${g + 2}:$${X.col(k)}$${g + 2}`, vals: Array.from({ length: k }, () => x.p.avg), color: 'C41E3A', type: 'line' },
-      ],
+      series: [{ name: 'Forbruk', f: `${qF}!$B$${x.r}:$${X.col(k)}$${x.r}`, vals: Array.from({ length: k }, (_, j) => x.p.use[di(j)]), color: '058479', type: 'bar' }],
       a: { c0: (g % 2) * 9, r0: 2 + Math.floor(g / 2) * 17, c1: (g % 2) * 9 + 8, r1: 2 + Math.floor(g / 2) * 17 + 16 },
     }));
-    sheets.push({ name: 'Grafer', rows: [[{ v: 'Forbruk per måned med snitt (diagrammene bruker arkene Forbruk og Snitt)', s: 5 }]], cols: [], noGrid: true, charts });
-    sheets.push({ name: 'Snitt', rows: rowsS, cols: [46, ...Array.from({ length: k }, () => 12)], freeze: { c: 1, r: 1 } });
+    sheets.push({ name: 'Grafer', rows: [[{ v: 'Forbruk per måned (diagrammene bruker arket Forbruk)', s: 5 }]], cols: [], noGrid: true, charts });
   }
   const blob = XLSX.build({ sheets });
   const name = `${tpl.name} målerstand og forbruk ${todayISO()}.xlsx`.replace(/[\\/:*?"<>|]/g, '');
@@ -1315,8 +1306,9 @@ async function buildReport(ins) {
     groups[groups.length - 1].rows.push(x);
   }
   let sn = 0;
+  const meterRep = hasMeters(tpl) && tpl.history;   // målerskjema: avlesningene vises i målerstand-tabellen, ikke som egen liste
   for (const g of groups) {
-    if (!g.rows.some(isQ)) continue;
+    if (meterRep || !g.rows.some(isQ)) continue;
     sn++; need(26); y += 1;
     d.rrect(M, y, 6.4, 6.4, 1.6, RC.acc); d.text(String(sn), M + 3.2, y + 4.6, { size: 9, bold: true, color: RC.white, align: 'center' });
     d.text(g.title, M + 9.5, y + 5, { size: 12.5, bold: true, color: RC.ink });
@@ -1361,7 +1353,7 @@ async function buildReport(ins) {
     y += 3;
   }
 
-  if (hasMeters(tpl) && tpl.history) meterPages(d, meterModel(tpl, ins.date), { W, M, CW, TOP, BOT });
+  if (meterRep) meterPages(d, meterModel(tpl, ins.date), { W, M, CW, TOP, BOT, y });
 
   // ----- Bilder (store, to og to) -----
   if (pc) {
