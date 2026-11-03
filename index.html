@@ -234,32 +234,8 @@ a.btn.primary { color: var(--accent-ink); }
 .anl-all > .list { margin-top: 8px; }
 .cov { display: flex; flex-direction: column; gap: 8px; }
 .flags { margin: 0; padding-left: 18px; font-size: 14px; } .flags .link { text-align: left; padding: 2px 0; }
-/* Timeliste */
-.hrs { gap: 12px; } .hrs-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.hrs-top .h2 { margin: 0; }
-.hrs-go { font-size: 22px; padding: 20px; } .hrs-go.stop { background: var(--bad); border-color: var(--bad); color: #fff; }
-.hrs-run { display: flex; align-items: center; gap: 10px; } .hrs-el { font: 700 40px/1 var(--display); font-variant-numeric: tabular-nums; }
-.hrs-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--bad); animation: hrsPulse 1.6s ease-in-out infinite; }
-@keyframes hrsPulse { 50% { opacity: .25; } }
-.hrs-foot { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; } .hrs-foot .link { padding: 6px 2px; }
-.sheet-card.hs { max-height: 92dvh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-.hs-total { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; } .hs-total b { font: 700 34px/1.1 var(--display); font-variant-numeric: tabular-nums; }
-.hs-times { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
-.hs-times > * { min-width: 0; overflow: hidden; }
-.hs-line, .hs-row { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
-.hs-row input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); height: 36px; } .hs-row b { min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
-.hs-n { flex: 0 0 108px; overflow-wrap: anywhere; font-weight: 600; } .hs-line .hs-n { flex: 1 1 auto; } .hs-men { min-width: 24px; text-align: center; font-size: 20px; }
-.hs-rest { display: flex; justify-content: space-between; color: var(--muted); font-size: 14px; } .hs-add { display: flex; gap: 8px; } .hs-add .inp { flex: 1; }
-.hs-edit { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
-.hm-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; } .hm-nav b { font: 700 20px/1.2 var(--display); text-transform: capitalize; }
-.hm-row { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); }
 @media (prefers-reduced-motion: no-preference) { .tpl, .row-main, .seg button { transition: background-color .12s; } }
-@media (prefers-reduced-motion: reduce) { .hrs-dot { animation: none; } }
 
-.hs-tasks{border:0;padding:0;margin:8px 0}.hs-tasks legend{font-weight:600;margin-bottom:4px}
-.hs-chk{display:flex;align-items:flex-start;gap:8px;padding:6px 0;font-size:15px}.hs-chk input{margin-top:3px;width:20px;height:20px;flex:0 0 auto}
-.hrs-tbtn{margin-top:8px;width:100%}.hrs-pick{margin-top:6px;max-height:40vh;overflow:auto;border:1px solid var(--line,#d8dde3);border-radius:10px;padding:6px 10px}
-.hrs-cont{width:100%;margin-top:10px}
 </style>
 </head>
 <body>
@@ -278,7 +254,6 @@ a.btn.primary { color: var(--accent-ink); }
 <script src="qr.js"></script>
 <script src="pdf.js"></script>
 <script src="xlsx.js"></script>
-<script src="hours.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
