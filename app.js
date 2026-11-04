@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-03 å17';
+const APP_VERSION = '2026-11-04 å18';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -128,7 +128,7 @@ function secVisible(sec, ins) {
 }
 function itemVisible(it, ins, prefix) {
   const c = it.showIf; if (!c) return true;
-  if (c.cold) { const m = +(ins.date || todayISO()).slice(5, 7); return m >= 9 || m <= 4; }   // kuldeperiode: inspeksjonsdato i sept–april
+  if (c.cold || c.months) { const m = +(ins.date || todayISO()).slice(5, 7); return c.months ? c.months.includes(m) : (m >= 9 || m <= 4); }   // kuldeperiode (sept–april) eller egne måneder, etter inspeksjonsdatoen
   const v = ins.answers[prefix + '.' + c.item]?.value;
   if ('eq' in c) return v === c.eq;
   if ('ne' in c) return v !== c.ne;
