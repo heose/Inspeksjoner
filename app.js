@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-04 å19';
+const APP_VERSION = '2026-11-04 å20';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -1203,6 +1203,16 @@ const RC = {
   na: [112, 124, 132], naBg: [232, 236, 238], sel: [5, 132, 121], selBg: [214, 237, 234],
   actBg: [255, 246, 214], actLine: [226, 191, 61], actInk: [96, 72, 8]
 };
+// Avvik-farge i PDF følger prioriteten på handlingene: Høy rød, Middels oransje, Lav gul. Avvik uten handling regnes som Lav.
+const PRIO_COL = {
+  'Høy': { bar: RC.bad, bg: RC.badBg, pill: RC.bad, ink: RC.white, txt: RC.bad },
+  'Middels': { bar: [226, 110, 20], bg: [255, 240, 226], pill: [226, 110, 20], ink: RC.white, txt: [178, 84, 8] },
+  'Lav': { bar: [222, 176, 20], bg: [255, 248, 218], pill: [240, 200, 60], ink: RC.ink, txt: [128, 92, 0] }
+};
+function itemPrio(a) {
+  const ps = (a?.actions || []).map(z => z.prio || 'Lav');
+  return ps.includes('Høy') ? 'Høy' : ps.includes('Middels') ? 'Middels' : 'Lav';
+}
 // Nedskalerer bildet til rapporten (stort nok for 80 mm bredde), ellers brukes originalen
 async function reportPhoto(rec, max = 1000) {
   const orig = async () => ({ data: new Uint8Array(await rec.blob.arrayBuffer()), w: rec.w, h: rec.h });
@@ -1264,7 +1274,7 @@ async function buildReport(ins) {
   // ----- Krever oppfølging -----
   const hits = items.filter(x => isQ(x) && (isFlag(x.it, ins.answers[x.key]) || (ins.answers[x.key]?.actions || []).length));
   if (hits.length) {
-    d.text('Krever oppfølging', M, y + 3, { size: 11, bold: true, color: RC.bad }); y += 6;
+    d.text('Krever oppfølging', M, y + 3, { size: 11, bold: true, color: RC.ink }); y += 6;
     for (const x of hits) {
       const a = ins.answers[x.key] || {}, ph = photosOf(a);
       const hl = d.wrap(`${secTitle(x)}  ›  ${x.it.label}${ph.length ? '   (bilde ' + ph.join(', ') + ')' : ''}`, 10, true, CW - 10);
@@ -1278,7 +1288,8 @@ async function buildReport(ins) {
       });
       const h = 4 + hl.length * 4.6 + vl.length * 4.2 + nl.length * 4.2 + al.reduce((n, z) => n + z.t.length * 4.4 + 5.4 + z.thH, 0) + 2.5;
       need(h + 2.5);
-      d.rrect(M, y, CW, h, 2, RC.badBg); d.rect(M, y + 1.5, 1.2, h - 3, RC.bad);
+      const pcol = PRIO_COL[itemPrio(a)];
+      d.rrect(M, y, CW, h, 2, pcol.bg); d.rect(M, y + 1.5, 1.2, h - 3, pcol.bar);
       let yy = y + 5.4;
       hl.forEach(l => { d.text(l, M + 5, yy, { size: 10, bold: true, color: RC.ink }); yy += 4.6; });
       vl.forEach(l => { d.text(l, M + 5, yy, { size: 9, color: RC.muted }); yy += 4.2; });
@@ -1345,7 +1356,7 @@ async function buildReport(ins) {
         if (!g.rows.slice(ri + 1).some(r => r.it.type !== 'heading')) continue;
         need(16); y += 3; d.text(it.label.toUpperCase(), M + 1, y + 3.4, { size: 7.8, bold: true, color: RC.acc }); y += 5.4; continue;
       }
-      const v = a.value; let ans = null, tone = null;
+      const v = a.value; let ans = null, tone = null; const pcol = PRIO_COL[itemPrio(a)];
       if (CHOICE_TYPES.includes(it.type) && v) { ans = v; tone = toneFor(it, v); }
       else if (it.type === 'multi' && Array.isArray(v) && v.length) { ans = v.join(', '); tone = 'sel'; }
       else if (it.type === 'number' && v != null && v !== '') ans = (it.meter && numOf(v) != null ? nbsp(numOf(v)) : String(v).replace('.', ',')) + (it.unit ? ' ' + it.unit.replace('³', '3') : '');   // m³ skrives m3 i PDF: ³ vises ikke i alle PDF-lesere
@@ -1363,15 +1374,15 @@ async function buildReport(ins) {
       const labH = Math.max(ll.length * 4.7, 6);
       const bodyH = labH + 3.6 + bl.length * 4.6 + nl.length * 4.2;
       need(bodyH + 1);
-      if (tone === 'bad') { d.rect(M, y, CW, bodyH, RC.badRow); d.rect(M, y, 1.1, bodyH, RC.bad); }
+      if (tone === 'bad') { d.rect(M, y, CW, bodyH, pcol.bg); d.rect(M, y, 1.1, bodyH, pcol.bar); }
       ll.forEach((l, i) => d.text(l, M + 3, y + 5.4 + i * 4.7, { size: 10, bold: tone === 'bad', color: RC.ink }));
       if (pillTxt) {
-        const [bg, fg] = tone === 'ok' ? [RC.okBg, RC.ok] : tone === 'bad' ? [RC.bad, RC.white] : tone === 'sel' ? [RC.selBg, RC.sel] : [RC.naBg, RC.na];
+        const [bg, fg] = tone === 'ok' ? [RC.okBg, RC.ok] : tone === 'bad' ? [pcol.pill, pcol.ink] : tone === 'sel' ? [RC.selBg, RC.sel] : [RC.naBg, RC.na];
         d.rrect(W - M - 2 - pw, y + 1.4, pw, 6.2, 3.1, bg); d.text(pillTxt, W - M - 2 - pw / 2, y + 5.7, { size: 8.8, bold: true, color: fg, align: 'center' });
       } else if (ans != null && !longAns) d.text(ans, W - M - 3, y + 5.4, { size: 10.5, bold: true, color: RC.ink, align: 'right' });
       else if (ans == null && it.type !== 'text') d.text('–', W - M - 3, y + 5.4, { size: 10.5, color: RC.muted, align: 'right' });
       let yy = y + labH + 1.2;
-      bl.forEach(l => { d.text(l, M + 3, yy + 3.4, { size: 10, color: tone === 'bad' ? RC.bad : RC.ink, bold: tone === 'bad' }); yy += 4.6; });
+      bl.forEach(l => { d.text(l, M + 3, yy + 3.4, { size: 10, color: tone === 'bad' ? pcol.txt : RC.ink, bold: tone === 'bad' }); yy += 4.6; });
       nl.forEach(l => { d.text(l, M + 3, yy + 3.4, { size: 9, color: RC.muted }); yy += 4.2; });
       y += bodyH;
       d.line(M, y, W - M, y, RC.line, 0.15);
