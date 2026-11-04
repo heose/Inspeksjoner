@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-04 å20';
+const APP_VERSION = '2026-11-04 å21';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -972,7 +972,7 @@ document.addEventListener('click', async e => {
     }
     case 'finish-force': await finish(ins); break;
     case 'finish-cancel': S.confirmFinish = false; render(); break;
-    case 'pdf': await makePdf(S.ins[b.dataset.id]); break;
+    case 'pdf': await openRecentPdf(b.dataset.id); break;
     case 'mail-copy': await mailCopy(S.ins[b.dataset.id]); break;
     case 'mail-open': await mailOpen(S.ins[b.dataset.id]); break;
     case 'xlsx': await makeXlsx(S.ins[b.dataset.id]); break;
@@ -1967,7 +1967,12 @@ async function openRecentPdf(id) {
   S.busy = true; toast('Henter PDF…', 8000);
   try {
     let blob, name;
-    if (ins && ins.status === 'complete' && TPL[ins.templateId]) { blob = await buildReport(ins); name = pdfName(ins); }
+    if (ins && ins.status === 'complete' && TPL[ins.templateId]) {
+      // Samme PDF uansett hvor man trykker («Siste inspeksjoner» og «Fullførte»): bygges på nytt fra lokale data og lastes opp til Hub
+      await flushAll();
+      blob = await buildReport(ins); name = pdfName(ins);
+      if (hubCfg() && navigator.onLine) hubFetch('PUT', `/pdf/${ins.id}?name=${encodeURIComponent(name)}`, blob, true).then(() => { ins.hubPdf = true; return saveIns(ins); }).catch(e => console.warn('Hub PDF', e));
+    }
     else {
       if (!hubCfg()) throw new Error('Koble til Hub under Innstillinger for å åpne PDF fra andre.');
       if (!navigator.onLine) throw new Error('Du må ha nett for å hente denne PDF-en.');
