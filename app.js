@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-04 å21';
+const APP_VERSION = '2026-11-04 å22';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -1235,14 +1235,18 @@ async function buildReport(ins) {
 
   // Bilder: nummereres i rekkefølge, vises store på slutten
   const pnum = {}, pinfo = {}; let pc = 0;
-  for (const x of items) for (const pid of [...(ins.answers[x.key]?.photos || []), ...((ins.answers[x.key]?.actions || []).flatMap(z => z.photos || []))]) {
-    if (pid in pnum) continue;
+  const loadPhoto = async (pid, cap) => {
+    if (pid in pnum) return;
     const rec = await DB.get('photos', pid).catch(() => null);
-    if (!rec) continue;
+    if (!rec) return;
     pnum[pid] = ++pc;
-    pinfo[pid] = { ...(await reportPhoto(rec)), cap: secTitle(x) + '  ›  ' + x.it.label };
-  }
-  const photosOf = a => (a?.photos || []).filter(p => pinfo[p]).map(p => pnum[p]);
+    pinfo[pid] = { ...(await reportPhoto(rec)), cap };
+  };
+  for (const x of items) for (const pid of [...(ins.answers[x.key]?.photos || []), ...((ins.answers[x.key]?.actions || []).flatMap(z => z.photos || []))]) await loadPhoto(pid, secTitle(x) + '  ›  ' + x.it.label);
+  // Bilder vises rett under teksten de hører til (punkt, handling, avvik), ikke samlet til slutt
+  const thumbsOf = pids => pids.filter(p => pinfo[p]).map(p => { const pi = pinfo[p]; let w = 34, h = w * pi.h / pi.w; if (h > 26) { h = 26; w = h * pi.w / pi.h; } return { p, pi, w, h }; });
+  const thumbH = th => th.length ? Math.max(...th.map(o => o.h)) + 7 : 0;
+  const drawThumbs = (th, x0, yy) => { let xx = x0; th.forEach(o => { d.image(o.pi.data, o.pi.w, o.pi.h, xx, yy, o.w, o.h); d.text('Bilde ' + pnum[o.p], xx, yy + o.h + 3, { size: 7.5, bold: true, color: RC.ink }); xx += o.w + 5; }); return yy + thumbH(th); };
   const need = h => { if (y + h > BOT) { d.addPage(); y = TOP; } };
 
   // Hvilke punkter teller: alt som er spørsmål (ikke overskrift/info)
@@ -1276,17 +1280,14 @@ async function buildReport(ins) {
   if (hits.length) {
     d.text('Krever oppfølging', M, y + 3, { size: 11, bold: true, color: RC.ink }); y += 6;
     for (const x of hits) {
-      const a = ins.answers[x.key] || {}, ph = photosOf(a);
-      const hl = d.wrap(`${secTitle(x)}  ›  ${x.it.label}${ph.length ? '   (bilde ' + ph.join(', ') + ')' : ''}`, 10, true, CW - 10);
+      const a = ins.answers[x.key] || {}, ith = thumbsOf(a.photos || []);
+      const hl = d.wrap(`${secTitle(x)}  ›  ${x.it.label}`, 10, true, CW - 10);
       const val = a.value != null && a.value !== '' ? (Array.isArray(a.value) ? a.value.join(', ') : String(a.value)) : '';
       const vl = val && x.it.type === 'date' && isFlag(x.it, a) ? d.wrap('Svar: ' + fmt(val), 9, false, CW - 10) : [];
       const nl = a.note ? d.wrap(a.note, 9, false, CW - 10) : [];
       const al = (a.actions || []).map(z => ({ t: d.wrap(z.text || '(uten beskrivelse)', 9.5, false, CW - 10), meta: ['Ansvarlig ' + (z.who || '-'), 'Prioritet ' + (z.prio || '-'), 'Frist ' + (z.due ? fmt(z.due) : '-')].concat(z.done ? ['Utført'] : []).join('   ·   ') }));
-      (a.actions || []).forEach((z, zi) => {
-        const th = (z.photos || []).filter(p => pinfo[p]).map(p => { const pi = pinfo[p]; let w = 34, h = w * pi.h / pi.w; if (h > 26) { h = 26; w = h * pi.w / pi.h; } return { p, pi, w, h }; });
-        al[zi].th = th; al[zi].thH = th.length ? Math.max(...th.map(o => o.h)) + 7 : 0;
-      });
-      const h = 4 + hl.length * 4.6 + vl.length * 4.2 + nl.length * 4.2 + al.reduce((n, z) => n + z.t.length * 4.4 + 5.4 + z.thH, 0) + 2.5;
+      (a.actions || []).forEach((z, zi) => { al[zi].th = thumbsOf(z.photos || []); al[zi].thH = thumbH(al[zi].th); });
+      const h = 4 + hl.length * 4.6 + vl.length * 4.2 + nl.length * 4.2 + thumbH(ith) + al.reduce((n, z) => n + z.t.length * 4.4 + 5.4 + z.thH, 0) + 2.5;
       need(h + 2.5);
       const pcol = PRIO_COL[itemPrio(a)];
       d.rrect(M, y, CW, h, 2, pcol.bg); d.rect(M, y + 1.5, 1.2, h - 3, pcol.bar);
@@ -1294,8 +1295,9 @@ async function buildReport(ins) {
       hl.forEach(l => { d.text(l, M + 5, yy, { size: 10, bold: true, color: RC.ink }); yy += 4.6; });
       vl.forEach(l => { d.text(l, M + 5, yy, { size: 9, color: RC.muted }); yy += 4.2; });
       nl.forEach(l => { d.text(l, M + 5, yy, { size: 9, color: RC.muted }); yy += 4.2; });
+      yy = drawThumbs(ith, M + 5, yy);
       al.forEach(z => { z.t.forEach(l => { d.text(l, M + 5, yy, { size: 9.5, color: RC.ink }); yy += 4.4; }); d.text(z.meta, M + 5, yy, { size: 8, color: RC.muted }); yy += 5.4;
-        if (z.th.length) { let xx = M + 5; z.th.forEach(o => { d.image(o.pi.data, o.pi.w, o.pi.h, xx, yy, o.w, o.h); d.text('Bilde ' + pnum[o.p], xx, yy + o.h + 3, { size: 7.5, bold: true, color: RC.ink }); xx += o.w + 5; }); yy += z.thH; } });
+        if (z.th.length) yy = drawThumbs(z.th, M + 5, yy); });
       y += h + 2.5;
     }
     y += 3;
@@ -1321,14 +1323,17 @@ async function buildReport(ins) {
       d.text(`Avvik meldt siden forrige runde${prev ? ' (etter ' + fmt(prev.date) + ')' : ''}`, M, y + 3, { size: 11, bold: true, color: RC.ink }); y += 6.5;
       for (const i of av) {
         const head = d.wrap(`${fmt(i.date)} · ${i.anl && ANL[i.anl] ? ANL[i.anl].name : 'Annet'}${(i.where || '').trim() ? ' · ' + i.where.trim() : ''} · meldt av ${i.by || '-'}`, 9, true, CW - 10);
-        const acts = []; for (const a of Object.values(i.answers)) for (const z of a.actions || []) acts.push(z);
-        const bl = acts.map(z => ({ t: d.wrap(z.text || '(uten beskrivelse)', 9.5, false, CW - 10), meta: ['Ansvarlig ' + (z.who || '-'), 'Prioritet ' + (z.prio || '-'), 'Frist ' + (z.due ? fmt(z.due) : '-')].concat(z.done ? ['Utført'] : []).join('   ·   ') }));
-        const h = 4 + head.length * 4.4 + bl.reduce((n, z) => n + z.t.length * 4.4 + 5.4, 0) + 1.5;
+        const ans = Object.values(i.answers || {}), cap = 'Avvik ' + fmt(i.date) + (i.anl && ANL[i.anl] ? '  ›  ' + ANL[i.anl].name : '');
+        for (const a of ans) for (const pid of [...(a.photos || []), ...(a.actions || []).flatMap(z => z.photos || [])]) await loadPhoto(pid, cap);
+        const ith = ans.flatMap(a => thumbsOf(a.photos || []));
+        const bl = ans.flatMap(a => (a.actions || []).map(z => ({ t: d.wrap(z.text || '(uten beskrivelse)', 9.5, false, CW - 10), meta: ['Ansvarlig ' + (z.who || '-'), 'Prioritet ' + (z.prio || '-'), 'Frist ' + (z.due ? fmt(z.due) : '-')].concat(z.done ? ['Utført'] : []).join('   ·   '), th: thumbsOf(z.photos || []) })));
+        const h = 4 + head.length * 4.4 + thumbH(ith) + bl.reduce((n, z) => n + z.t.length * 4.4 + 5.4 + thumbH(z.th), 0) + 1.5;
         need(h + 2.5);
         d.rrect(M, y, CW, h, 2, RC.actBg); d.rect(M, y + 1.5, 1.2, h - 3, RC.actLine);
         let yy = y + 5.2;
         head.forEach(l => { d.text(l, M + 5, yy, { size: 9, bold: true, color: RC.actInk }); yy += 4.4; });
-        bl.forEach(z => { z.t.forEach(l => { d.text(l, M + 5, yy, { size: 9.5, color: RC.ink }); yy += 4.4; }); d.text(z.meta, M + 5, yy, { size: 8, color: RC.actInk }); yy += 5.4; });
+        yy = drawThumbs(ith, M + 5, yy);
+        bl.forEach(z => { z.t.forEach(l => { d.text(l, M + 5, yy, { size: 9.5, color: RC.ink }); yy += 4.4; }); d.text(z.meta, M + 5, yy, { size: 8, color: RC.actInk }); yy += 5.4; yy = drawThumbs(z.th, M + 5, yy); });
         y += h + 2.5;
       }
       y += 3;
@@ -1362,8 +1367,7 @@ async function buildReport(ins) {
       else if (it.type === 'number' && v != null && v !== '') ans = (it.meter && numOf(v) != null ? nbsp(numOf(v)) : String(v).replace('.', ',')) + (it.unit ? ' ' + it.unit.replace('³', '3') : '');   // m³ skrives m3 i PDF: ³ vises ikke i alle PDF-lesere
       else if (it.type === 'date' && v) { ans = fmt(v); if (isFlag(it, a)) tone = 'bad'; }
       else if (it.type === 'text' && v) ans = String(v);
-      const ph = photosOf(a);
-      const label = it.label + (ph.length ? '   (bilde ' + (ph.length > 1 ? ph[0] + '–' + ph[ph.length - 1] : ph[0]) + ')' : '');
+      const label = it.label, pth = thumbsOf(a.photos || []);
       const longAns = ans != null && (it.type === 'text' || d.width(ans, 9, true) + 8 > 62);
       const pillTxt = tone && !longAns ? ans : null;
       const pw = pillTxt ? Math.max(15, d.width(pillTxt, 8.8, true) + 8) : 0;
@@ -1372,7 +1376,7 @@ async function buildReport(ins) {
       const bl = longAns ? d.wrap(ans, 10, false, CW - 12) : [];
       const nl = a.note ? d.wrap(a.note, 9, false, CW - 12) : [];
       const labH = Math.max(ll.length * 4.7, 6);
-      const bodyH = labH + 3.6 + bl.length * 4.6 + nl.length * 4.2;
+      const bodyH = labH + 3.6 + bl.length * 4.6 + nl.length * 4.2 + thumbH(pth);
       need(bodyH + 1);
       if (tone === 'bad') { d.rect(M, y, CW, bodyH, pcol.bg); d.rect(M, y, 1.1, bodyH, pcol.bar); }
       ll.forEach((l, i) => d.text(l, M + 3, y + 5.4 + i * 4.7, { size: 10, bold: tone === 'bad', color: RC.ink }));
@@ -1384,6 +1388,7 @@ async function buildReport(ins) {
       let yy = y + labH + 1.2;
       bl.forEach(l => { d.text(l, M + 3, yy + 3.4, { size: 10, color: tone === 'bad' ? pcol.txt : RC.ink, bold: tone === 'bad' }); yy += 4.6; });
       nl.forEach(l => { d.text(l, M + 3, yy + 3.4, { size: 9, color: RC.muted }); yy += 4.2; });
+      drawThumbs(pth, M + 3, yy);
       y += bodyH;
       d.line(M, y, W - M, y, RC.line, 0.15);
     }
@@ -1391,29 +1396,6 @@ async function buildReport(ins) {
   }
 
   if (meterRep) meterPages(d, meterModel(tpl, ins.date), { W, M, CW, TOP, BOT, y });
-
-  // ----- Bilder (store, to og to) -----
-  if (pc) {
-    const pw = 80, gap = 10, x0 = M + (CW - 2 * pw - gap) / 2, maxH = 112;
-    d.addPage(); y = TOP;
-    d.text('Bilder', M, y + 4, { size: 16, bold: true, color: RC.ink }); d.line(M, y + 8, W - M, y + 8, RC.acc, 0.35); y += 14;
-    const list = Object.keys(pnum).sort((a, b) => pnum[a] - pnum[b]);
-    for (let i = 0; i < list.length; i += 2) {
-      const pair = list.slice(i, i + 2).map(p => {
-        const pi = pinfo[p]; let w = pw, h = w * pi.h / pi.w; if (h > maxH) { h = maxH; w = h * pi.w / pi.h; }
-        return { p, pi, w, h, cap: d.wrap(pi.cap, 8, false, pw - 18)[0] };
-      });
-      const rowH = Math.max(...pair.map(o => o.h)) + 13;
-      if (y + rowH > BOT) { d.addPage(); y = TOP; }
-      pair.forEach((o, j) => {
-        const x = x0 + j * (pw + gap);
-        d.image(o.pi.data, o.pi.w, o.pi.h, x, y, o.w, o.h);
-        d.text(`Bilde ${pnum[o.p]}`, x, y + o.h + 4.4, { size: 8.5, bold: true, color: RC.ink });
-        d.text(o.cap, x + 17, y + o.h + 4.4, { size: 8, color: RC.muted });
-      });
-      y += rowH;
-    }
-  }
 
   // ----- Bunntekst -----
   const n = d.pages.length;
