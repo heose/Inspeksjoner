@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-04 å18';
+const APP_VERSION = '2026-11-04 å19';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -154,7 +154,7 @@ function stats(ins) {
     if (isFlag(x.it, a)) r.flags++;
     const acts = a?.actions || [];
     r.actions += acts.length; r.open += acts.filter(z => !z.done).length;
-    r.photos += (a?.photos || []).length;
+    r.photos += (a?.photos || []).length + acts.reduce((n, z) => n + (z.photos || []).length, 0);
     if (['yn', 'ok', 'okm', 'choice', 'multi', 'number'].includes(x.it.type)) {
       if (!x.it.opt) {
         r.total++;
@@ -494,7 +494,7 @@ function newAvvik(o = {}) {
     answers: { 'avvik.feil': { actions: [{ id, text: '', due: addDays(todayISO(), 14), who: S.settings.by, prio: 'Middels', done: false }] } }, repeats: {}, createdAt: Date.now(), updatedAt: Date.now() };
   avSite(ins);
   S.ins[ins.id] = ins; flush(ins.id); openIns(ins.id);
-  S.pickKey = 'avvik.feil'; $('#filepick').click();
+  S.pickKey = 'avvik.feil'; S.pickAid = null; $('#filepick').click();
 }
 function openIns(id) { S.cur = id; S.view = 'ins'; S.confirmFinish = false; render(); window.scrollTo(0, 0); }
 function goHome(root) { flushAll(); syncTrello(); if (root) { S.anl = null; S.site = null; } S.cur = null; S.view = S.anl ? 'anl' : S.site ? 'site' : 'home'; render(); window.scrollTo(0, 0); }
@@ -815,7 +815,7 @@ function itemHTML(ins, it, key) {
   }
   const note = a.note != null ? `<textarea class="inp note" id="nt-${k}" rows="2" data-bind="${k}" data-field="note" placeholder="Notat">${esc(a.note)}</textarea>` : '';
   const thumbs = photos.length ? `<div class="thumbs">${photos.map((pid, ix) => `<button type="button" class="thumb" data-act="thumb" data-key="${k}" data-ix="${ix}" aria-label="Åpne bilde ${ix + 1}"><img data-pid="${pid}" alt=""></button>`).join('')}</div>` : '';
-  const actsH = acts.map(act => actHTML(key, act, ins.status === 'complete')).join('');
+  const actsH = acts.map(act => actHTML(key, act, ins.status === 'complete', photos)).join('');
   return `<div class="item${flag ? ' is-flag' : ''}" id="it-${k}">
     <div class="q">${esc(it.label)}</div>${it.help ? `<div class="help">${esc(it.help)}</div>` : ''}
     ${ctl}${note}${thumbs}${actsH}
@@ -825,7 +825,13 @@ function itemHTML(ins, it, key) {
       <button type="button" class="tool${want && !acts.length ? ' prompt' : ''}" data-act="act-add" data-key="${k}">+ Handling</button>
     </div>`}</div>`;
 }
-function actHTML(key, act, sent) {
+function actPhotosH(key, act, ptPhotos) {
+  const k = esc(key), own = act.photos || [];
+  const ownH = own.length ? `<div class="thumbs">${own.map((pid, ix) => `<button type="button" class="thumb" data-act="thumb" data-key="${k}" data-aid="${act.id}" data-ix="${ix}" aria-label="Åpne handlingsbilde ${ix + 1}"><img data-pid="${pid}" alt=""></button>`).join('')}</div>` : '';
+  const mov = ptPhotos.length ? `<div class="move"><span class="muted small">Bilder fra punktet. Trykk på et bilde for å flytte det til denne handlingen:</span><div class="thumbs">${ptPhotos.map(pid => `<button type="button" class="thumb" data-act="act-move" data-key="${k}" data-aid="${act.id}" data-pid="${pid}" aria-label="Flytt bilde til denne handlingen"><img data-pid="${pid}" alt=""></button>`).join('')}</div></div>` : '';
+  return `${ownH}${mov}<div class="tools"><button type="button" class="tool" data-act="act-photo" data-key="${k}" data-aid="${act.id}">+ Bilde</button></div>`;
+}
+function actHTML(key, act, sent, ptPhotos = []) {
   const k = esc(key), base = `${k}|${act.id}`;
   return `<div class="act${act.done ? ' done' : ''}">
     <div class="act-h"><span class="act-tag">Handling</span>${trTag(act, sent)}<label class="chk"><input type="checkbox" id="ad-${act.id}" data-actf="${base}|done"${act.done ? ' checked' : ''}> Utført</label></div>
@@ -835,6 +841,7 @@ function actHTML(key, act, sent) {
       <label class="fld"><span>Ansvarlig</span><input id="aw-${act.id}" data-actf="${base}|who" value="${esc(act.who || '')}"></label>
       <label class="fld"><span>Prioritet</span><select id="ap-${act.id}" data-actf="${base}|prio">${['Lav', 'Middels', 'Høy'].map(p => `<option${act.prio === p ? ' selected' : ''}>${p}</option>`).join('')}</select></label>
     </div>
+    ${actPhotosH(key, act, ptPhotos)}
     <button type="button" class="link danger" data-act="act-del" data-key="${k}" data-aid="${act.id}">Slett handling</button>
   </div>`;
 }
@@ -928,8 +935,14 @@ document.addEventListener('click', async e => {
       else { if (!a.note) delete a.note; else { toast('Notatet er beholdt. Tøm teksten for å fjerne det.'); break; } render(); }
       touch(ins); break;
     }
-    case 'photo': S.pickKey = key; $('#filepick').click(); break;
-    case 'thumb': openEditor(key, +b.dataset.ix); break;
+    case 'photo': S.pickKey = key; S.pickAid = null; $('#filepick').click(); break;
+    case 'thumb': openEditor(key, +b.dataset.ix, b.dataset.aid || null); break;
+    case 'act-photo': S.pickKey = key; S.pickAid = b.dataset.aid; $('#filepick').click(); break;
+    case 'act-move': {
+      const a = A(ins, key), act = (a.actions || []).find(z => z.id === b.dataset.aid);
+      if (act) { a.photos = (a.photos || []).filter(p => p !== b.dataset.pid); (act.photos ||= []).push(b.dataset.pid); touch(ins); render(); }
+      break;
+    }
     case 'act-add': {
       const a = A(ins, key); const id = uid();
       (a.actions ||= []).push({ id, text: '', due: addDays(todayISO(), 14), who: S.settings.by, prio: 'Lav', done: false });
@@ -1010,7 +1023,7 @@ async function deleteIns(id) {
   try { await chains[id]; } catch (e) {}
   delete chains[id];
   await DB.del('inspections', id);
-  for (const a of Object.values(victim.answers || {})) for (const p of a.photos || []) DB.del('photos', p);
+  for (const a of Object.values(victim.answers || {})) for (const p of [...(a.photos || []), ...(a.actions || []).flatMap(z => z.photos || [])]) DB.del('photos', p);
   anlCache = null; openCache = null;
 }
 function arm(b, label) {
@@ -1074,25 +1087,32 @@ async function toJpeg(src, max = 1600, q = 0.82) {
 }
 $('#filepick').addEventListener('change', async e => {
   const files = [...e.target.files]; e.target.value = '';
-  const ins = cur(), key = S.pickKey; if (!files.length || !ins || !key) return;
+  const ins = cur(), key = S.pickKey, aid = S.pickAid; S.pickAid = null; if (!files.length || !ins || !key) return;
   for (let n = 0; n < files.length; n++) {
     toast(files.length > 1 ? `Lagrer bilde ${n + 1} av ${files.length}…` : 'Lagrer bilde…', 8000);
     const url = URL.createObjectURL(files[n]);
     try {
       const { blob, w, h } = await toJpeg(url); const id = uid();
       await DB.put('photos', { id, blob, w, h });
-      (A(ins, key).photos ||= []).push(id);
+      pickList(ins, key, aid).push(id);
     } catch (err) { toast('Bildet kunne ikke lagres: ' + err.message); }
     finally { URL.revokeObjectURL(url); }
   }
   touch(ins); render(); toast('Bilde lagret. Trykk på bildet for å markere.');
 });
 
-const ED = { key: null, ix: 0, id: null, img: null, strokes: [], drawing: null };
+// Bildelisten for et punkt (aid = null) eller for en handling på punktet
+function pickList(ins, key, aid) {
+  const a = A(ins, key);
+  if (!aid) return (a.photos ||= []);
+  const act = (a.actions || []).find(z => z.id === aid);
+  return act ? (act.photos ||= []) : (a.photos ||= []);
+}
+const ED = { key: null, ix: 0, id: null, aid: null, img: null, strokes: [], drawing: null };
 const cv = $('#ed-canvas'), cx = cv.getContext('2d');
-async function openEditor(key, ix) {
-  const id = cur().answers[key].photos[ix];
-  Object.assign(ED, { key, ix, id, strokes: [], drawing: null });
+async function openEditor(key, ix, aid = null) {
+  const id = pickList(cur(), key, aid)[ix];
+  Object.assign(ED, { key, ix, id, aid, strokes: [], drawing: null });
   ED.img = await loadImage(URLS[id]);
   cv.width = ED.img.naturalWidth; cv.height = ED.img.naturalHeight;
   edDraw(); $('#editor').hidden = false; document.body.classList.add('noscroll');
@@ -1121,7 +1141,7 @@ $('#ed-save').onclick = async () => {
 $('#ed-del').onclick = async () => {
   const b = $('#ed-del');
   if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Trykk igjen'; return; }
-  const a = cur().answers[ED.key]; a.photos = a.photos.filter(p => p !== ED.id);
+  const L = pickList(cur(), ED.key, ED.aid), k = L.indexOf(ED.id); if (k >= 0) L.splice(k, 1);
   await DB.del('photos', ED.id); touch(cur()); closeEditor(); render(); toast('Bildet er slettet');
 };
 
@@ -1205,7 +1225,7 @@ async function buildReport(ins) {
 
   // Bilder: nummereres i rekkefølge, vises store på slutten
   const pnum = {}, pinfo = {}; let pc = 0;
-  for (const x of items) for (const pid of ins.answers[x.key]?.photos || []) {
+  for (const x of items) for (const pid of [...(ins.answers[x.key]?.photos || []), ...((ins.answers[x.key]?.actions || []).flatMap(z => z.photos || []))]) {
     if (pid in pnum) continue;
     const rec = await DB.get('photos', pid).catch(() => null);
     if (!rec) continue;
@@ -1252,14 +1272,19 @@ async function buildReport(ins) {
       const vl = val && x.it.type === 'date' && isFlag(x.it, a) ? d.wrap('Svar: ' + fmt(val), 9, false, CW - 10) : [];
       const nl = a.note ? d.wrap(a.note, 9, false, CW - 10) : [];
       const al = (a.actions || []).map(z => ({ t: d.wrap(z.text || '(uten beskrivelse)', 9.5, false, CW - 10), meta: ['Ansvarlig ' + (z.who || '-'), 'Prioritet ' + (z.prio || '-'), 'Frist ' + (z.due ? fmt(z.due) : '-')].concat(z.done ? ['Utført'] : []).join('   ·   ') }));
-      const h = 4 + hl.length * 4.6 + vl.length * 4.2 + nl.length * 4.2 + al.reduce((n, z) => n + z.t.length * 4.4 + 5.4, 0) + 2.5;
+      (a.actions || []).forEach((z, zi) => {
+        const th = (z.photos || []).filter(p => pinfo[p]).map(p => { const pi = pinfo[p]; let w = 34, h = w * pi.h / pi.w; if (h > 26) { h = 26; w = h * pi.w / pi.h; } return { p, pi, w, h }; });
+        al[zi].th = th; al[zi].thH = th.length ? Math.max(...th.map(o => o.h)) + 7 : 0;
+      });
+      const h = 4 + hl.length * 4.6 + vl.length * 4.2 + nl.length * 4.2 + al.reduce((n, z) => n + z.t.length * 4.4 + 5.4 + z.thH, 0) + 2.5;
       need(h + 2.5);
       d.rrect(M, y, CW, h, 2, RC.badBg); d.rect(M, y + 1.5, 1.2, h - 3, RC.bad);
       let yy = y + 5.4;
       hl.forEach(l => { d.text(l, M + 5, yy, { size: 10, bold: true, color: RC.ink }); yy += 4.6; });
       vl.forEach(l => { d.text(l, M + 5, yy, { size: 9, color: RC.muted }); yy += 4.2; });
       nl.forEach(l => { d.text(l, M + 5, yy, { size: 9, color: RC.muted }); yy += 4.2; });
-      al.forEach(z => { z.t.forEach(l => { d.text(l, M + 5, yy, { size: 9.5, color: RC.ink }); yy += 4.4; }); d.text(z.meta, M + 5, yy, { size: 8, color: RC.muted }); yy += 5.4; });
+      al.forEach(z => { z.t.forEach(l => { d.text(l, M + 5, yy, { size: 9.5, color: RC.ink }); yy += 4.4; }); d.text(z.meta, M + 5, yy, { size: 8, color: RC.muted }); yy += 5.4;
+        if (z.th.length) { let xx = M + 5; z.th.forEach(o => { d.image(o.pi.data, o.pi.w, o.pi.h, xx, yy, o.w, o.h); d.text('Bilde ' + pnum[o.p], xx, yy + o.h + 3, { size: 7.5, bold: true, color: RC.ink }); xx += o.w + 5; }); yy += z.thH; } });
       y += h + 2.5;
     }
     y += 3;
@@ -1506,12 +1531,23 @@ async function sendCard(ins, tpl, key, a, act, listId) {
   act.trello = { id: c.id, url: c.shortUrl || c.url, done: false, pics: 0 };
   await saveIns(ins);
 }
+// Handlingens egne bilder går til sitt kort. Punktbilder uten handling går til første handling på punktet, én gang.
+function trelloPhotoIds(a, act) {
+  const own = act.photos || [], acts = a.actions || [];
+  return acts[0] && acts[0].id === act.id ? [...own, ...(a.photos || [])] : own;
+}
+function sentOf(a, act) {
+  if (!Array.isArray(act.trello.sent)) act.trello.sent = (a.photos || []).slice(0, act.trello.pics || 0);   // eldre kort: punktbilder ble sendt i rekkefølge
+  return act.trello.sent;
+}
+function photosPending(a, act) { if (!act.trello) return false; const s = sentOf(a, act); return trelloPhotoIds(a, act).some(p => !s.includes(p)); }
 async function sendPhotos(ins, a, act) {
-  const pics = a.photos || [];
-  while (act.trello.pics < pics.length) {
-    const n = act.trello.pics, rec = await DB.get('photos', pics[n]);
-    if (rec) { const f = new FormData(); f.append('file', rec.blob, `bilde-${n + 1}.jpg`); f.append('name', `Bilde ${n + 1}`); await tfetch('POST', `cards/${act.trello.id}/attachments`, {}, f); }
-    act.trello.pics = n + 1; await saveIns(ins);
+  const s = sentOf(a, act);
+  for (const pid of trelloPhotoIds(a, act)) {
+    if (s.includes(pid)) continue;
+    const rec = await DB.get('photos', pid), n = s.length + 1;
+    if (rec) { const f = new FormData(); f.append('file', rec.blob, `bilde-${n}.jpg`); f.append('name', `Bilde ${n}`); await tfetch('POST', `cards/${act.trello.id}/attachments`, {}, f); }
+    s.push(pid); act.trello.pics = s.length; await saveIns(ins);
   }
 }
 function trelloPending() {
@@ -1520,7 +1556,7 @@ function trelloPending() {
     if (ins.status !== 'complete') continue;
     for (const a of Object.values(ins.answers)) for (const act of a.actions || []) {
       if (!act.trello) { if ((act.text || '').trim()) n++; else empty++; }
-      else if (!!act.done !== !!act.trello.done || act.trello.pics < (a.photos || []).length) n++;
+      else if (!!act.done !== !!act.trello.done || photosPending(a, act)) n++;
     }
   }
   return { n, empty };
@@ -1560,7 +1596,7 @@ async function syncTrello(manual) {
         const listId = TRELLO.lists[listKey(ins, key)];
         if (!act.trello) { if (!listId || !(act.text || '').trim()) continue; await sendCard(ins, tpl, key, a, act, listId); sent++; }
         if (!act.trello) continue;
-        if (act.trello.pics < (a.photos || []).length) await sendPhotos(ins, a, act);
+        if (photosPending(a, act)) await sendPhotos(ins, a, act);
         if (!!act.done !== !!act.trello.done) {
           if (act.due) await tfetch('PUT', `cards/${act.trello.id}`, { dueComplete: act.done ? 'true' : 'false' });
           act.trello.done = !!act.done; upd++; await saveIns(ins);
