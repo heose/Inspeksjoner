@@ -23,7 +23,7 @@ const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-04 å22';
+const APP_VERSION = '2026-11-10 å23';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -69,7 +69,7 @@ const S = {
   inbox: null, ibEdit: {}, inboxPics: {},
   ins: {}, hours: {}, cur: null, view: 'home', ready: false, error: null,
   settings: { by: 'Henrik Oseberg', company: 'Oseberg Drift og Service' },
-  pickKey: null, ready_file: null, confirmFinish: false, showAllHist: false, showSettings: false, busy: false,
+  pickKey: null, ready_file: null, confirmFinish: false, showAllHist: false, tab: 'today', moreSec: null, busy: false,
 };
 try { Object.assign(S.settings, JSON.parse(localStorage.getItem('insp-settings') || '{}')); } catch (e) {}
 S.settings.notes = S.settings.notes || {};
@@ -85,7 +85,7 @@ try { const c = JSON.parse(localStorage.getItem('insp-content') || 'null'); if (
 try { const c = JSON.parse(localStorage.getItem('insp-links') || 'null'); if (c && Array.isArray(c.links)) { S.links = c.links; S.linksAt = c.at; } } catch (e) { console.error('Lenker', e); }
 
 const timers = {}; const chains = {};
-function touch(ins) { ins.updatedAt = Date.now(); scheduleSave(ins.id); }
+function touch(ins) { ins.updatedAt = Date.now(); scheduleSave(ins.id); if (S.view === 'ins' && S.cur === ins.id) refreshProg(); }
 function scheduleSave(id) {
   setStatus('Lagrer…');
   clearTimeout(timers[id]);
@@ -421,7 +421,35 @@ function covItems(c, ins) {
 }
 const answered = a => a && a.value != null && a.value !== '' && !(Array.isArray(a.value) && !a.value.length);
 const unresolved = a => !(a.actions || []).length || a.actions.some(z => !z.done);
-let anlCache = null, openCache = null;
+let anlCache = null, openCache = null, runCache = null;
+/* Gjengangere: samme punkt med avvik i de tre siste fullførte rundene av en mal.
+   Egne runder leses fra telefonen, andres fra Hub-loggen (feltet fl, som sendes fra og med FL_FROM). Runder uten fl regnes som uten avvik. */
+const FL_FROM = '2026-11-10';
+function flagKeys(i) {
+  const out = [], t = TPL[i.templateId]; if (!t) return out;
+  for (const x of walk(t, i)) if (x.it.type !== 'heading' && x.it.type !== 'info' && isFlag(x.it, i.answers[x.key])) out.push(x.key);
+  return out;
+}
+function runsOf(tid) {
+  runCache ||= {}; if (runCache[tid]) return runCache[tid];
+  const out = [], seen = new Set();
+  for (const i of Object.values(S.ins)) if (i.status === 'complete' && i.templateId === tid && i.date) { seen.add(i.id); out.push({ id: i.id, date: i.date, at: i.completedAt || i.updatedAt || 0, fl: flagKeys(i) }); }
+  for (const r of hubRows()) if (r.tpl === tid && r.date && !seen.has(r.id)) { seen.add(r.id); out.push({ id: r.id, date: r.date, at: r.at || 0, fl: Array.isArray(r.fl) ? r.fl : [] }); }
+  return (runCache[tid] = out.sort((a, b) => b.date.localeCompare(a.date) || b.at - a.at));
+}
+function repeatKeys(tid) {
+  const r = runsOf(tid).slice(0, 3);
+  return r.length < 3 ? [] : r[0].fl.filter(k => r[1].fl.includes(k) && r[2].fl.includes(k)).map(key => ({ key, dates: r.map(x => x.date).reverse() }));
+}
+/* Antall fullførte runder på rad, rett før denne, der punktet hadde avvik. */
+function priorStreak(ins, key) {
+  let n = 0;
+  for (const r of runsOf(ins.templateId)) {
+    if (r.id === ins.id || (ins.status === 'complete' && r.date > ins.date)) continue;
+    if (r.fl.includes(key)) n++; else break;
+  }
+  return n;
+}
 function anlState(a) {
   anlCache ||= {};
   if (anlCache[a.id]) return anlCache[a.id];
@@ -444,7 +472,7 @@ function anlState(a) {
     for (const r of hubRows()) if (Array.isArray(r.ac) && r.ac.includes(ck) && r.date && (!remote || r.date > remote)) remote = r.date;
     const lastDate = last && (!remote || last.date >= remote) ? last.date : remote;
     const next = lastDate ? (t.days ? addDays(lastDate, t.days) : addMonths(lastDate, t.months)) : null;
-    covs.push({ c, t, last, lastDate, flags: lastFlags, next, du: dueInfo(t, lastDate ? { date: lastDate } : null), d: next ? daysBetween(todayISO(), next) : null, draft: all.find(i => i.templateId === c.t && i.status !== 'complete') });
+    covs.push({ c, t, last, lastDate, flags: lastFlags, rep: repeatKeys(c.t).filter(z => covMatch(c, z.key, last || { answers: {} })), next, du: dueInfo(t, lastDate ? { date: lastDate } : null), d: next ? daysBetween(todayISO(), next) : null, draft: all.find(i => i.templateId === c.t && i.status !== 'complete') });
   }
   for (const i of all) if (i.anl === a.id) {
     const acts = Object.entries(i.answers).flatMap(([key, ans]) => (ans.actions || []).map(act => ({ key, act })));
@@ -461,7 +489,9 @@ function anlState(a) {
   else if (!worst) { cls = 'na'; text = 'Ikke kontrollert i Argus ennå'; }
   else { cls = worst.du.cls; text = worst.du.text; }
   if (cls === 'bad' && worst && worst.du.cls === 'bad' && (open.length || nflag)) text += ' · forfalt';
-  return (anlCache[a.id] = { covs, hist, open, nextDue, cls, text });
+  const reps = covs.flatMap(x => x.rep.map(z => ({ ...z, t: x.t, label: findItem(x.t, z.key).it?.label || z.key })));
+  if (reps.length) text += ' · gjenganger';
+  return (anlCache[a.id] = { covs, hist, open, nextDue, cls, text, reps });
 }
 const A = (ins, key) => (ins.answers[key] ||= {});
 const cur = () => S.ins[S.cur];
@@ -481,7 +511,7 @@ function newInspection(tid) {
   S.ins[ins.id] = ins; flush(ins.id);
   openIns(ins.id);
 }
-function openSite(id) { S.site = id; S.anlOpen = false; S.anl = null; S.cur = null; S.showAllHist = false; S.view = 'site'; render(); window.scrollTo(0, 0); }
+function openSite(id) { S.tab = 'sites'; S.site = id; S.anlOpen = false; S.anl = null; S.cur = null; S.showAllHist = false; S.view = 'site'; render(); window.scrollTo(0, 0); }
 function openAnl(id) { S.anl = id; S.site = ANL[id].site; S.view = 'anl'; S.cur = null; render(); window.scrollTo(0, 0); }
 function avSite(ins) {
   const site = SITES.find(x => x.id === ins.siteId);
@@ -497,7 +527,7 @@ function newAvvik(o = {}) {
   S.pickKey = 'avvik.feil'; S.pickAid = null; $('#filepick').click();
 }
 function openIns(id) { S.cur = id; S.view = 'ins'; S.confirmFinish = false; render(); window.scrollTo(0, 0); }
-function goHome(root) { flushAll(); syncTrello(); if (root) { S.anl = null; S.site = null; } S.cur = null; S.view = S.anl ? 'anl' : S.site ? 'site' : 'home'; render(); window.scrollTo(0, 0); }
+function goHome(root) { flushAll(); syncTrello(); if (root) { S.anl = null; S.site = null; S.moreSec = null; } S.cur = null; S.view = S.anl ? 'anl' : S.site ? 'site' : 'home'; render(); window.scrollTo(0, 0); }
 
 /* ---------- Visning ---------- */
 const app = $('#app');
@@ -506,7 +536,7 @@ let toastTimer;
 function toast(t, ms = 2600) { const el = $('#toast'); el.textContent = t; el.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, ms); }
 
 function render() {
-  anlCache = null; openCache = null;
+  anlCache = null; openCache = null; runCache = null;
   const bar = $('#topbar');
   if (S.view === 'anl' && ANL[S.anl] && S.ready) {
     bar.innerHTML = `<button class="back" data-act="to-site" aria-label="Tilbake til bygget">‹ ${SITES.find(x => x.id === ANL[S.anl].site).short}</button><div class="bar-title">${esc(ANL[S.anl].name)}</div><div class="bar-status"></div>`;
@@ -515,19 +545,27 @@ function render() {
     bar.innerHTML = `<button class="back" data-act="home-root" aria-label="Tilbake til byggene">‹ Bygg</button><div class="bar-title">${esc(SITES.find(x => x.id === S.site).name)}</div><div class="bar-status"></div>`;
     app.innerHTML = renderSite();
   } else if (S.view === 'inbox' && S.ready) {
-    bar.innerHTML = `<button class="back" data-act="home-root" aria-label="Tilbake til oversikten">‹ Oversikt</button><div class="bar-title">Innmeldinger</div><div class="bar-status"></div>`;
+    bar.innerHTML = `<button class="back" data-act="home-root" aria-label="Tilbake">‹ ${tabName()}</button><div class="bar-title">Innmeldinger</div><div class="bar-status"></div>`;
     app.innerHTML = renderInbox();
   } else if (S.view === 'links' && S.ready) {
-    bar.innerHTML = `<button class="back" data-act="home-root" aria-label="Tilbake til oversikten">‹ Oversikt</button><div class="bar-title">Del lenker</div><div class="bar-status"></div>`;
+    bar.innerHTML = `<button class="back" data-act="home-root" aria-label="Tilbake">‹ ${tabName()}</button><div class="bar-title">Del lenker</div><div class="bar-status"></div>`;
     app.innerHTML = renderLinks();
   } else if (S.view === 'ins' && cur()) {
     const t = TPL[cur().templateId];
-    bar.innerHTML = `<button class="back" data-act="home" aria-label="Tilbake">‹ ${S.anl && ANL[S.anl] ? 'Anlegg' : S.site ? SITES.find(x => x.id === S.site).short : 'Oversikt'}</button><div class="bar-title">${esc(t.name)}</div><div class="bar-status" id="save-status">Lagret</div>`;
+    bar.innerHTML = `<button class="back" data-act="home" aria-label="Tilbake">‹ ${S.anl && ANL[S.anl] ? 'Anlegg' : S.site ? SITES.find(x => x.id === S.site).short : tabName()}</button><div class="bar-title">${esc(t.name)}</div><div class="bar-status" id="save-status">Lagret</div>`;
     app.innerHTML = renderIns();
+  } else if (S.moreSec && S.ready && TEMPLATES.length) {
+    bar.innerHTML = `<button class="back" data-act="more-back" aria-label="Tilbake til Mer">‹ Mer</button><div class="bar-title">${MORE_T[S.moreSec] || 'Innstillinger'}</div><div class="bar-status"></div>`;
+    app.innerHTML = renderSettings(S.moreSec);
   } else {
-    bar.innerHTML = `<div class="brand"><span class="brand-name">Argus</span><span class="brand-co">${esc(S.settings.company)}</span></div><button class="ghost-sm" data-act="settings">${S.showSettings ? 'Lukk' : 'Innstillinger'}</button>`;
+    const tabbed = S.ready && TEMPLATES.length;
+    bar.innerHTML = `<div class="brand"><span class="brand-name">${tabbed ? tabName() : 'Argus'}</span><span class="brand-co">${esc(tabbed && S.tab === 'today' ? todayLong() : S.settings.company)}</span></div>`;
     app.innerHTML = S.ready ? renderHome() : (S.error ? `<p class="empty">${esc(S.error)}</p>` : '<p class="empty">Laster…</p>');
   }
+  { const tabs = $('#tabs'), bar2 = $('#insbar'), showTabs = !!(S.ready && TEMPLATES.length) && !(S.view === 'ins' && cur()), showBar = insBarOn();
+    tabs.hidden = !showTabs; tabs.innerHTML = showTabs ? tabsHTML() : '';
+    bar2.hidden = !showBar; bar2.innerHTML = showBar ? insBarHTML(stats(cur())) : '';
+    document.body.classList.toggle('has-tabs', showTabs); document.body.classList.toggle('has-insbar', showBar); }
   renderSheet();
   hydratePhotos();
 }
@@ -549,17 +587,110 @@ function renderGate() {
     <div class="row-btns"><button class="btn primary" data-act="gate-connect">${S.hubBusy ? 'Kobler til…' : 'Koble til'}</button></div>
     <p class="muted small">Administrator: <button class="link" data-act="content-upload">last opp innholdsfil</button></p></section>`;
 }
+/* ---------- Forside: fire faner (I dag, Bygg, Handlinger, Mer) ---------- */
+const TABS = [['today', 'I dag'], ['sites', 'Bygg'], ['acts', 'Handlinger'], ['more', 'Mer']];
+const tabName = () => (TABS.find(x => x[0] === S.tab) || TABS[0])[1];
+const svgIc = d => `<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const TAB_ICON = {
+  today: svgIc('<path d="M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/><path d="M3 10h18M8 3v4M16 3v4M9 15l2 2 4-4"/>'),
+  sites: svgIc('<path d="M4 21V5l8-2v18M12 9l8 2v10M2 21h20M7 8h2M7 12h2M7 16h2"/>'),
+  acts: svgIc('<path d="M9 11l3 3 8-8"/><path d="M20 12v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h11"/>'),
+  more: svgIc('<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>'),
+};
+const MORE_T = { me: 'Meg', conn: 'Tilkobling', admin: 'Administrator' };
+const todayLong = () => new Date().toLocaleDateString('nb-NO', { weekday: 'long', day: 'numeric', month: 'long' });
+const inboxNew = () => (S.inbox || []).filter(x => x.status === 'ny').length;
+function tabsHTML() {
+  const badge = { acts: allOpen().length, more: inboxNew() };
+  return TABS.map(([id, name]) => `<button type="button" class="tab" data-act="tab" data-id="${id}"${S.tab === id ? ' aria-current="page"' : ''}>${TAB_ICON[id]}<span>${name}</span>${badge[id] ? `<span class="badge">${badge[id]}<span class="sr"> ${id === 'acts' ? 'åpne handlinger' : 'nye innmeldinger'}</span></span>` : ''}</button>`).join('');
+}
+
 function renderHome() {
   if (!TEMPLATES.length) return renderGate();
+  return S.tab === 'sites' ? renderSites() : S.tab === 'acts' ? renderActs() : S.tab === 'more' ? renderMore() : renderToday();
+}
+
+/* Runder som bør gjøres nå, på tvers av bygg. Påbegynte vises for seg, ferdige i perioden utelates. */
+function dueRows() {
+  const done = doneList(), out = [];
+  for (const site of SITES) for (const id of site.tpls) {
+    const t = TPL[id]; if (!t) continue;
+    if (Object.values(S.ins).some(i => i.templateId === id && i.status !== 'complete')) continue;
+    const du = dueInfo(t, lastOf(id, done));
+    if (du.cls !== 'ok') out.push({ t, site, du });
+  }
+  return out.sort((x, y) => rank[x.du.cls] - rank[y.du.cls] || (x.du.date || '9').localeCompare(y.du.date || '9'));
+}
+
+function renderToday() {
   const all = Object.values(S.ins);
   const drafts = all.filter(i => i.status !== 'complete').sort((a, b) => b.updatedAt - a.updatedAt);
-  const done = all.filter(i => i.status === 'complete').sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.updatedAt - a.updatedAt);
   let h = installHint();
+  { const nNy = (S.inbox || []).filter(x => x.status === 'ny').length;
+    if (nNy) h += `<button class="btn inbox-card" data-act="inbox-open"><span class="inbox-n">${nNy}</span><span>${nNy === 1 ? 'Ny innmelding' : 'Nye innmeldinger'} fra eksterne venter på godkjenning</span><span class="chev" aria-hidden="true">›</span></button>`; }
+  if (drafts.length) {
+    h += `<section><h2 class="h2">Pågår</h2><div class="list">${drafts.map(i => {
+      const st = stats(i); const t = TPL[i.templateId];
+      return `<div class="row-card"><button class="row-main" data-act="open" data-id="${i.id}">
+        <span class="rc-title">${esc(t.name)}</span><span class="rc-sub">${esc(i.site)} · ${fmt(i.date)}</span>
+        <span class="rc-sub">${st.total - st.unanswered} av ${st.total} besvart${st.flags ? ` · <b class="t-bad">${st.flags} avvik</b>` : ''}</span></button>
+        <button class="link danger" data-act="del-ins" data-id="${i.id}">Slett</button></div>`;
+    }).join('')}</div></section>`;
+  }
 
-  if (S.showSettings) {
-    h += `<section class="panel settings"><h2 class="h2">Innstillinger</h2>
-      <label class="fld"><span>Ditt navn (utført av, ansvarlig)</span><input id="set-by" data-set="by" value="${esc(S.settings.by)}"></label>
-      <label class="fld"><span>Firmanavn i rapporter</span><input id="set-co" data-set="company" value="${esc(S.settings.company)}"></label>
+  {
+    const lb = S.settings.lastBackup, ndone = all.filter(i => i.status === 'complete').length;
+    if (ndone && (!lb || daysBetween(lb, todayISO()) >= 7)) h += `<div class="notice backup"><strong>${lb ? `Siste sikkerhetskopi er ${daysBetween(lb, todayISO())} dager gammel.` : 'Du har ikke tatt sikkerhetskopi ennå.'}</strong> Alt ligger bare på denne telefonen. Lagre kopien i iCloud Drive eller Google Drive.<div class="row-btns"><button class="btn primary" data-act="export">Lag sikkerhetskopi nå</button></div></div>`;
+  }
+  { const due = dueRows(), shown = S.showAllDue ? due : due.slice(0, 5);
+    h += `<section><h2 class="h2">Forfaller <span class="count">${due.length}</span></h2>`;
+    h += due.length ? `<div class="list">${shown.map(x => `<div class="row-card due"><span class="dot ${x.du.cls}" aria-hidden="true"></span>
+        <button class="row-main" data-act="site" data-id="${x.site.id}"><span class="rc-title">${esc(x.t.name)}</span><span class="rc-sub ${x.du.cls === 'bad' ? 't-bad' : ''}">${esc(x.site.name)} · ${esc(x.du.text)}</span></button>
+        <button class="btn start${x.du.cls === 'bad' || x.du.cls === 'warn' ? ' primary' : ''}" data-act="new" data-tpl="${x.t.id}" aria-label="Start ${esc(x.t.name)}">Start</button></div>`).join('')}</div>${due.length > 5 && !S.showAllDue ? `<button class="link more" data-act="due-all">Vis alle ${due.length}</button>` : ''}`
+      : '<p class="empty">Ingen runder forfaller nå.</p>';
+    h += '</section>'; }
+  { const open = allOpen(), dated = open.filter(x => x.due).sort((a, b) => a.due.localeCompare(b.due) || actSort(a, b)).slice(0, 3);
+    if (dated.length) h += `<section><h2 class="h2">Handlinger med frist</h2><div class="list">${dated.map(x => actLine(x, true)).join('')}</div>${open.length > dated.length ? `<button class="link more" data-act="tab" data-id="acts">Alle ${open.length} åpne handlinger</button>` : ''}</section>`; }
+  h += `<div class="fab-space" aria-hidden="true"></div><div class="fabbar"><button class="btn avvik-big" data-act="avvik-new">Meld avvik</button></div>`;
+  return h;
+}
+
+function renderSites() {
+  let h = `<section><div class="list">${SITES.map(site => {
+    const ss = siteState(site);
+    return `<button class="sitebtn" data-act="site" data-id="${site.id}"><span class="dot ${ss.cls}" aria-hidden="true"></span>
+      <span class="anl-txt"><span class="site-name">${esc(site.name)} <span class="count">${site.short}</span></span>
+      <span class="rc-sub ${ss.cls === 'bad' ? 't-bad' : ''}">${esc(ss.text)}</span><span class="rc-sub">${esc(ss.rounds)}</span></span><span class="chev" aria-hidden="true">›</span></button>`;
+  }).join('')}</div></section>`;
+  h += recentHtml(null);
+  return h;
+}
+
+function renderActs() {
+  const all = allOpen();
+  let h = `<section>${trelloHomeLine()}`;
+  h += all.length ? `<div class="list">${all.map(x => actLine(x, true)).join('')}</div>` : '<p class="empty">Ingen åpne handlinger.</p>';
+  h += actsStatus();
+  return h + '</section>';
+}
+
+function renderMore() {
+  const nNy = inboxNew(), lb = S.settings.lastBackup, chev = '<span class="chev" aria-hidden="true">›</span>';
+  const row = (act, id, t, sub, right = '') => `<button class="gr" data-act="${act}"${id ? ` data-id="${id}"` : ''}><span class="anl-txt"><span class="rc-title">${t}</span><span class="rc-sub">${sub}</span></span>${right}${chev}</button>`;
+  return `<section><h2 class="h2">Verktøy</h2><div class="grp">
+      ${row('inbox-open', '', 'Innmeldinger', 'Fra leietakere og andre', nNy ? `<span class="pill bad">${nNy} ${nNy === 1 ? 'ny' : 'nye'}</span>` : '')}
+      ${row('links-open', '', 'Del lenker og skjema', 'QR, del og kopier')}
+    </div></section>
+    <section><h2 class="h2">Innstillinger</h2><div class="grp">
+      ${row('more-sec', 'me', 'Meg', `Navn, lokale notater og sikkerhetskopi${lb ? ' (sist ' + fmt(lb) + ')' : ''}`)}
+      ${row('more-sec', 'conn', 'Tilkobling', 'Argus Hub, Trello og versjon')}
+      ${row('more-sec', 'admin', 'Administrator', 'Innholdsfil og lenker')}
+    </div></section>
+    <p class="muted small ver">Argus, versjon ${APP_VERSION} · ${esc(S.settings.company)}</p>`;
+}
+
+function renderSettings(sec) {
+  if (sec === 'conn') return `<section class="panel settings">
       <h3 class="h3">Trello</h3>
       ${hubCfg() ? `<p class="muted small">Trello går via Argus Hub, så du trenger ikke nøkkel eller token her. Handlinger fra fullførte inspeksjoner sendes som kort til tavlen Vaktmester, i listen for riktig bygg.</p>
       <div class="row-btns"><button class="btn" data-act="tr-test">Test tilkobling</button></div>
@@ -579,48 +710,25 @@ function renderHome() {
       <label class="fld"><span>Hub-adresse</span><input id="hub-url" data-hub="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://argus-hub.navn.workers.dev" value="${esc(S.settings.hub.url || '')}"></label>
       <label class="fld"><span>Hub-kode</span><input id="hub-code" type="password" data-hub="code" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(S.settings.hub.code || '')}"></label>
       <div class="row-btns"><button class="btn" data-act="hub-test">Test Hub</button><button class="btn" data-act="hub-sync">Oppdater nå</button></div>
+      <p class="muted small">Argus, versjon ${APP_VERSION}</p>
+      <div class="row-btns"><button class="btn" data-act="force-update">Hent nyeste versjon</button></div>
+    </section>`;
+  if (sec === 'admin') return `<section class="panel settings"><h3 class="h3">Innhold</h3>
       <p class="muted small">Innhold (sjekklister og anlegg): ${S.contentAt ? 'hentet fra Hub ' + new Date(S.contentAt).toLocaleDateString('nb-NO') : 'ikke hentet'}. <button class="link" data-act="content-upload">Last opp innholdsfil (administrator)</button></p>
+      <h3 class="h3">Lenker og skjema</h3>
+      <p class="muted small">Lenkene som deles fra Argus redigeres under Del lenker og skjema.</p>
+      <div class="row-btns"><button class="btn" data-act="links-open">Åpne Del lenker og skjema</button></div>
+    </section>`;
+  return `<section class="panel settings">
+      <label class="fld"><span>Ditt navn (utført av, ansvarlig)</span><input id="set-by" data-set="by" value="${esc(S.settings.by)}"></label>
+      <label class="fld"><span>Firmanavn i rapporter</span><input id="set-co" data-set="company" value="${esc(S.settings.company)}"></label>
       <h3 class="h3">Koder og lokale notater</h3>
       <p class="muted small">Lagres bare på denne telefonen. Vises øverst i sjekklisten, men kommer ikke med i PDF-en. Er med i sikkerhetskopien, så oppbevar den privat.</p>
       ${TEMPLATES.filter(t => !t.hidden).map(t => `<label class="fld"><span>${esc(t.name)}</span><textarea class="inp" id="ln-${t.id}" rows="2" data-lnote="${t.id}">${esc(S.settings.notes[t.id] || '')}</textarea></label>`).join('')}
-      <p class="muted small">Argus, versjon ${APP_VERSION}</p>
-      <div class="row-btns"><button class="btn" data-act="force-update">Hent nyeste versjon</button></div>
       <h3 class="h3">Sikkerhetskopi</h3>
       <p class="muted small">Alt ligger bare på denne telefonen. Ta en kopi jevnlig og legg den i iCloud Drive eller Google Drive.</p>
       <div class="row-btns"><button class="btn" data-act="export">Lag sikkerhetskopi</button><button class="btn" data-act="import">Gjenopprett fra fil</button></div>
     </section>`;
-    return h;
-  }
-
-  if (drafts.length) {
-    h += `<section><h2 class="h2">Pågår</h2><div class="list">${drafts.map(i => {
-      const st = stats(i); const t = TPL[i.templateId];
-      return `<div class="row-card"><button class="row-main" data-act="open" data-id="${i.id}">
-        <span class="rc-title">${esc(t.name)}</span><span class="rc-sub">${esc(i.site)} · ${fmt(i.date)}</span>
-        <span class="rc-sub">${st.total - st.unanswered} av ${st.total} besvart${st.flags ? ` · <b class="t-bad">${st.flags} avvik</b>` : ''}</span></button>
-        <button class="link danger" data-act="del-ins" data-id="${i.id}">Slett</button></div>`;
-    }).join('')}</div></section>`;
-  }
-
-  {
-    const lb = S.settings.lastBackup, ndone = all.filter(i => i.status === 'complete').length;
-    if (ndone && (!lb || daysBetween(lb, todayISO()) >= 7)) h += `<div class="notice backup"><strong>${lb ? `Siste sikkerhetskopi er ${daysBetween(lb, todayISO())} dager gammel.` : 'Du har ikke tatt sikkerhetskopi ennå.'}</strong> Alt ligger bare på denne telefonen. Lagre kopien i iCloud Drive eller Google Drive.<div class="row-btns"><button class="btn primary" data-act="export">Lag sikkerhetskopi nå</button></div></div>`;
-  }
-  { const nNy = (S.inbox || []).filter(x => x.status === 'ny').length;
-    if (nNy) h += `<button class="btn inbox-card" data-act="inbox-open"><span class="inbox-n">${nNy}</span><span>${nNy === 1 ? 'Ny innmelding' : 'Nye innmeldinger'} fra eksterne venter på godkjenning</span><span class="chev" aria-hidden="true">›</span></button>`; }
-  h += `<button class="btn avvik-big" data-act="avvik-new">Meld avvik</button>`;
-  h += `<button class="btn linkbtn" data-act="links-open"><span>Del lenker og skjema</span><span class="chev" aria-hidden="true">›</span></button>`;
-  h += `<section><h2 class="h2">Velg bygg</h2><div class="list">${SITES.map(site => {
-    const ss = siteState(site);
-    return `<button class="sitebtn" data-act="site" data-id="${site.id}"><span class="dot ${ss.cls}" aria-hidden="true"></span>
-      <span class="anl-txt"><span class="site-name">${esc(site.name)} <span class="count">${site.short}</span></span>
-      <span class="rc-sub ${ss.cls === 'bad' ? 't-bad' : ''}">${esc(ss.text)}</span><span class="rc-sub">${esc(ss.rounds)}</span></span><span class="chev" aria-hidden="true">›</span></button>`;
-  }).join('')}</div>${trelloHomeLine()}</section>`;
-  { const all = allOpen();
-    if (all.length) { const shown = S.showAllAct ? all : all.slice(0, 6);
-      h += `<section><h2 class="h2">Åpne handlinger <span class="count">${all.length}</span></h2><div class="list">${shown.map(x => actLine(x, true)).join('')}</div>${all.length > 6 && !S.showAllAct ? `<button class="link more" data-act="act-all">Vis alle ${all.length}</button>` : ''}</section>`; } }
-  h += recentHtml(null);
-  return h;
 }
 
 const rank = { bad: 0, warn: 1, blue: 2, ok: 3, na: 4 };
@@ -714,6 +822,7 @@ function renderAnl() {
     <p class="muted">${esc(site.name)}${a.note ? ' · ' + esc(a.note) : ''}</p>
     <p><span class="pill ${st.cls}">${esc(st.text)}</span></p>
     <button class="btn primary" data-act="avvik" data-id="${a.id}">Meld avvik</button></section>`;
+  if (st.reps.length) h += `<section class="notice rep"><strong>Gjenganger</strong>${st.reps.map(z => `<p>«${esc(z.label)}» har hatt avvik tre runder på rad i ${esc(z.t.name)}: ${z.dates.map(fmt).join(', ')}.</p>`).join('')}</section>`;
   h += `<section><h2 class="h2">Kontroller</h2><div class="list">${st.covs.map(x => {
     const due = x.du;
     return `<div class="panel cov"><div class="tpl-top"><span class="tpl-name">${esc(x.t.name)}</span><span class="freq">${freqLabel(x.t)}</span></div>
@@ -735,7 +844,8 @@ function renderAnl() {
 
 function renderIns() {
   const ins = cur(); const tpl = TPL[ins.templateId]; const st = stats(ins);
-  let h = `<section class="panel meta">
+  let h = insBarOn() ? `<div class="prog" id="prog">${progHTML(st)}</div>` : '';
+  h += `<section class="panel meta">
     <h1 class="ins-title">${esc(tpl.name)}</h1>
     ${ins.status === 'complete' ? `<p class="done-note">Fullført. Endringer lagres, og du kan lage ny PDF når som helst.</p>` : ''}
     <div class="fields">
@@ -778,6 +888,38 @@ function renderIns() {
   return h;
 }
 
+/* Fremdrift øverst og fast linje nederst mens en runde pågår. Ikke for avviksmelding eller fullførte. */
+const COUNTED = ['yn', 'ok', 'okm', 'choice', 'multi', 'number'];
+const insBarOn = () => { const i = S.view === 'ins' ? cur() : null; return !!i && i.status !== 'complete' && i.templateId !== 'avvik' && !!TPL[i.templateId]; };
+function progHTML(st) {
+  const done = st.total - st.unanswered, pct = st.total ? Math.round(done / st.total * 100) : 0;
+  return `<div class="prog-row"><b>${done} av ${st.total} besvart</b><span class="${st.flags ? 't-bad' : 'muted'}">${st.flags} avvik</span></div><div class="prog-bar" role="progressbar" aria-label="Fremdrift" aria-valuemin="0" aria-valuemax="${st.total}" aria-valuenow="${done}"><i style="width:${pct}%"></i></div>`;
+}
+function insBarHTML(st) {
+  return st.unanswered ? `<button class="btn primary" data-act="next-open">Neste ubesvarte (${st.unanswered} igjen)</button><button class="btn" data-act="go-finish">Til fullføring</button>`
+    : `<button class="btn primary" data-act="go-finish">Alt er besvart. Gå til fullføring</button>`;
+}
+function refreshProg() {
+  const ins = cur(), p = $('#prog'), b = $('#insbar'); if (!ins || !p) return;
+  const st = stats(ins); p.innerHTML = progHTML(st); if (b && !b.hidden) b.innerHTML = insBarHTML(st);
+}
+function unansweredKeys(ins) {
+  const out = [];
+  for (const x of walk(TPL[ins.templateId], ins)) {
+    if (!COUNTED.includes(x.it.type) || x.it.opt) continue;
+    const v = ins.answers[x.key]?.value;
+    if (v == null || v === '' || (Array.isArray(v) && !v.length)) out.push(x.key);
+  }
+  return out;
+}
+function nextOpen() {
+  const ins = cur(); if (!ins) return;
+  const els = unansweredKeys(ins).map(k => document.getElementById('it-' + k)).filter(Boolean); if (!els.length) return;
+  const mid = window.innerHeight / 2, el = els.find(e => e.getBoundingClientRect().top > mid + 10) || els[0];
+  el.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  el.classList.add('pulse'); setTimeout(() => el.classList.remove('pulse'), 1400);
+}
+
 function itemHTML(ins, it, key) {
   if (it.type === 'heading') return `<h3 class="sub">${esc(it.label)}</h3>`;
   if (it.type === 'info') return `<p class="info">${esc(it.label)}</p>`;
@@ -816,9 +958,10 @@ function itemHTML(ins, it, key) {
   const note = a.note != null ? `<textarea class="inp note" id="nt-${k}" rows="2" data-bind="${k}" data-field="note" placeholder="Notat">${esc(a.note)}</textarea>` : '';
   const thumbs = photos.length ? `<div class="thumbs">${photos.map((pid, ix) => `<button type="button" class="thumb" data-act="thumb" data-key="${k}" data-ix="${ix}" aria-label="Åpne bilde ${ix + 1}"><img data-pid="${pid}" alt=""></button>`).join('')}</div>` : '';
   const actsH = acts.map(act => actHTML(key, act, ins.status === 'complete', photos)).join('');
+  const repH = flag && it.type !== 'date' && priorStreak(ins, key) >= 2 ? '<div class="rep-line">Gjenganger: avvik tre runder på rad</div>' : '';
   return `<div class="item${flag ? ' is-flag' : ''}" id="it-${k}">
     <div class="q">${esc(it.label)}</div>${it.help ? `<div class="help">${esc(it.help)}</div>` : ''}
-    ${ctl}${note}${thumbs}${actsH}
+    ${ctl}${repH}${note}${thumbs}${actsH}
     ${it.calc ? '' : `<div class="tools">
       <button type="button" class="tool" data-act="note" data-key="${k}">${a.note != null ? 'Skjul notat' : 'Notat'}</button>
       <button type="button" class="tool" data-act="photo" data-key="${k}">Bilde</button>
@@ -904,7 +1047,12 @@ document.addEventListener('click', async e => {
     case 'avvik-new': newAvvik({ site: b.dataset.site }); break;
     case 'av-site': if (ins) { ins.siteId = b.dataset.id; ins.anl = null; ins.annet = false; S.settings.lastSite = ins.siteId; saveSettings(); avSite(ins); touch(ins); render(); } break;
     case 'to-site': openSite(S.site); break;
-    case 'settings': S.showSettings = !S.showSettings; render(); window.scrollTo(0, 0); break;
+    case 'tab': flushAll(); S.tab = b.dataset.id; S.moreSec = null; S.anl = null; S.site = null; S.cur = null; S.view = 'home'; S.showAllDue = false; S.showAllAct = false; render(); window.scrollTo(0, 0); break;
+    case 'more-sec': S.moreSec = b.dataset.id; render(); window.scrollTo(0, 0); break;
+    case 'more-back': S.moreSec = null; render(); window.scrollTo(0, 0); break;
+    case 'due-all': S.showAllDue = true; render(); break;
+    case 'next-open': nextOpen(); break;
+    case 'go-finish': document.querySelector('.finish')?.scrollIntoView({ block: 'end' }); break;
     case 'new': newInspection(b.dataset.tpl); break;
     case 'open': openIns(b.dataset.id); if (b.dataset.focus) { const el = document.getElementById('it-' + b.dataset.focus); if (el) el.scrollIntoView({ block: 'center' }); } break;
     case 'hist-all': S.showAllHist = true; render(); break;
@@ -1024,7 +1172,7 @@ async function deleteIns(id) {
   delete chains[id];
   await DB.del('inspections', id);
   for (const a of Object.values(victim.answers || {})) for (const p of [...(a.photos || []), ...(a.actions || []).flatMap(z => z.photos || [])]) DB.del('photos', p);
-  anlCache = null; openCache = null;
+  anlCache = null; openCache = null; runCache = null;
 }
 function arm(b, label) {
   const old = b.textContent; b.dataset.armed = '1'; b.textContent = label; b.classList.add('armed');
@@ -1462,7 +1610,7 @@ async function tfetch(method, path, params = {}, body) {
 }
 function trelloErr(e) {
   if (hubCfg()) {
-    if (e.status === 401 && /kode/i.test(e.body || '')) return 'Hub avviste koden. Sjekk Hub-koden under Innstillinger.';
+    if (e.status === 401 && /kode/i.test(e.body || '')) return 'Hub avviste koden. Sjekk Hub-koden under Mer, Tilkobling.';
     if (e.status === 401) return 'Trello avviste token som ligger i Hub. Hent nytt token og oppdater secret TRELLO_TOKEN i Cloudflare.';
     if (e.status === 500 && /Trello er ikke/.test(e.body || '')) return 'Trello er ikke satt opp i Hub. Legg inn secrets TRELLO_KEY og TRELLO_TOKEN i Cloudflare.';
     if (e.status === 403) return 'Hub tillater ikke dette Trello-kallet. Er worker.js oppdatert?';
@@ -1556,7 +1704,7 @@ function trelloPending() {
 }
 function trelloHomeLine() {
   const { n, empty } = trelloPending();
-  if (!trelloCfg()) return Object.values(S.ins).some(i => i.status === 'complete') ? '<p class="muted small">Koble til Trello under Innstillinger for å sende handlingene automatisk.</p>' : '';
+  if (!trelloCfg()) return Object.values(S.ins).some(i => i.status === 'complete') ? '<p class="muted small">Koble til Trello under Mer, Tilkobling for å sende handlingene automatisk.</p>' : '';
   if (!n && !empty) return '';
   return `${S.trErr && n ? `<p class="t-bad small">Siste forsøk feilet: ${esc(S.trErr)}</p>` : ''}<div class="tr-line"><span class="muted small">${n ? n + ' venter på sending til Trello' : ''}${empty ? (n ? ' · ' : '') + empty + ' uten tekst (sendes ikke)' : ''}</span>${n ? '<button class="link" data-act="tr-sync">Send nå</button>' : ''}</div>`;
 }
@@ -1565,7 +1713,7 @@ const trTag = (act, sent) => act.trello && act.trello.id
   : (sent ? '<span class="tr-tag wait">Venter på Trello</span>' : '');
 async function syncTrello(manual) {
   if (S.syncing) return;
-  if (!trelloCfg()) { if (manual === true) toast('Legg inn API-nøkkel og token under Innstillinger først.'); return; }
+  if (!trelloCfg()) { if (manual === true) toast('Legg inn API-nøkkel og token under Mer, Tilkobling først.'); return; }
   if (!navigator.onLine) { if (manual === true) toast('Ingen nett. Handlingene sendes når du har dekning igjen.'); return; }
   S.syncing = true; let sent = 0, upd = 0, err = null, closed = 0;
   try {
@@ -1603,7 +1751,7 @@ async function syncTrello(manual) {
   if (err) { console.error(err); if (err.status || manual === true) toast(S.trErr, 8000); }
   else if (sent || closed) toast([sent ? `${sent} ${sent === 1 ? 'handling' : 'handlinger'} sendt til Trello` : '', closed ? `${closed} lukket i Trello` : ''].filter(Boolean).join(' · '));
   else if (manual === true) toast(upd ? 'Trello er oppdatert' : 'Ingen handlinger venter');
-  if (S.view !== 'ins' && !S.showSettings) render();
+  if (S.view !== 'ins' && !S.moreSec) render();
 }
 
 /* ---------- Argus Hub (delt logg) ---------- */
@@ -1681,11 +1829,11 @@ function covKeys(i) {
   });
   return out;
 }
-const hubRecSync = i => ({ ...hubRec(i), ac: covKeys(i) });
+const hubRecSync = i => { const fl = (i.date || '') >= FL_FROM ? flagKeys(i).slice(0, 60) : []; return { ...hubRec(i), ac: covKeys(i), ...(fl.length ? { fl } : {}) }; };
 const hubRows = () => Object.values(S.hubMonths || {}).flatMap(m => m.rows || []);
 async function hubSync(manual) {
   const c = hubCfg();
-  if (!c) { if (manual === true) toast('Legg inn adresse og kode til Hub under Innstillinger først.'); return; }
+  if (!c) { if (manual === true) toast('Legg inn adresse og kode til Hub under Mer, Tilkobling først.'); return; }
   if (S.hubBusy && Date.now() - (S.hubBusyAt || 0) < 60000) return;
   if (!navigator.onLine) { if (manual === true) toast('Ingen nett. Oppdateres når du har dekning.'); return; }
   S.hubBusy = true; S.hubBusyAt = Date.now(); S.hubErrMsg = null;
@@ -1932,7 +2080,7 @@ function recentHtml(siteId) {
   h += rows.length ? `<div class="list">${rows.map(r => `<button class="mrow" data-act="recent-pdf" data-id="${esc(r.id)}"><span class="rc-title">${esc(r.name)}</span><span class="rc-sub">${siteId ? '' : esc(SITES.find(s => s.id === r.siteId)?.short || '') + ' · '}${fmt(r.date)}${r.by ? ' · ' + esc(r.by) : ''}${r.flags ? ` · <b class="t-bad">${r.flags} avvik</b>` : ''}</span><span class="pdf-tag" aria-hidden="true">PDF</span><span class="sr">Åpne PDF-rapport</span></button>`).join('')}</div>` : '<p class="empty">Ingen fullførte inspeksjoner ennå.</p>';
   h += actsStatus();
   h += c ? `<div class="tr-line"><span class="${S.hubErrMsg ? 't-bad ' : 'muted '}small">${S.hubErrMsg ? esc(S.hubErrMsg) : fresh ? 'Oppdatert kl. ' + fresh : 'Ikke hentet ennå'}</span><button class="link" data-act="hub-sync">${S.hubBusy ? 'Oppdaterer…' : 'Oppdater nå'}</button></div>`
-    : '<p class="muted small">Koble til Argus Hub under Innstillinger for å se det alle har gjort.</p>';
+    : '<p class="muted small">Koble til Argus Hub under Mer, Tilkobling for å se det alle har gjort.</p>';
   return h + '</section>';
 }
 
@@ -1956,7 +2104,7 @@ async function openRecentPdf(id) {
       if (hubCfg() && navigator.onLine) hubFetch('PUT', `/pdf/${ins.id}?name=${encodeURIComponent(name)}`, blob, true).then(() => { ins.hubPdf = true; return saveIns(ins); }).catch(e => console.warn('Hub PDF', e));
     }
     else {
-      if (!hubCfg()) throw new Error('Koble til Hub under Innstillinger for å åpne PDF fra andre.');
+      if (!hubCfg()) throw new Error('Koble til Hub under Mer, Tilkobling for å åpne PDF fra andre.');
       if (!navigator.onLine) throw new Error('Du må ha nett for å hente denne PDF-en.');
       blob = await hubBlob('/pdf/' + encodeURIComponent(id));
       name = `${rec ? rec.name + ' ' + fmt(rec.date) : 'Rapport'}.pdf`.replace(/[\\/:*?"<>|]/g, '');

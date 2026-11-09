@@ -234,6 +234,36 @@ a.btn.primary { color: var(--accent-ink); }
 .anl-all > .list { margin-top: 8px; }
 .cov { display: flex; flex-direction: column; gap: 8px; }
 .flags { margin: 0; padding-left: 18px; font-size: 14px; } .flags .link { text-align: left; padding: 2px 0; }
+/* Faner nederst, fast «Meld avvik» på I dag, og fremdrift i inspeksjon */
+.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 25; background: var(--surface); border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(4, 1fr);
+  padding: 4px max(8px, env(safe-area-inset-right, 0px)) calc(4px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px)); }
+.tab { border: 0; background: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 12px; font-weight: 600; color: var(--muted); min-height: 52px; position: relative; }
+.tab[aria-current="page"] { color: var(--accent); }
+.tab svg { width: 24px; height: 24px; }
+.tab .badge { position: absolute; top: 2px; left: calc(50% + 6px); background: var(--bad); color: #fff; border-radius: 999px; font-size: 11px; line-height: 17px; padding: 0 6px; font-weight: 700; }
+body.has-tabs { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
+body.has-insbar { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+body.has-tabs .toast, body.has-insbar .toast { bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
+.fabbar { position: fixed; left: 0; right: 0; bottom: calc(61px + env(safe-area-inset-bottom, 0px)); z-index: 24; background: var(--bg);
+  padding: 8px max(16px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px)); }
+.fabbar .btn { display: block; max-width: 728px; margin: 0 auto; }
+.fab-space { height: 56px; }
+.row-card.due { padding-left: 14px; } .row-card.due .row-main { padding-left: 8px; }
+.btn.start { min-height: 44px; flex: none; }
+.grp { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; display: flex; flex-direction: column; }
+.gr { display: flex; align-items: center; gap: 12px; padding: 12px 14px; min-height: 58px; border: 0; border-top: 1px solid var(--line); background: none; text-align: left; width: 100%; }
+.gr:first-child { border-top: 0; } .gr:active { background: var(--surface-2); }
+.ver { text-align: center; margin: 0; }
+.insbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 25; background: var(--surface); border-top: 1px solid var(--line); display: flex; gap: 8px;
+  padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.insbar .btn { flex: 1; min-height: 48px; } .insbar .btn.primary { flex: 2; }
+.prog { position: sticky; top: calc(54px + env(safe-area-inset-top, 0px)); z-index: 15; background: var(--bg); border-bottom: 1px solid var(--line); margin: -12px -16px 0; padding: 10px 16px; display: flex; flex-direction: column; gap: 6px; }
+.prog-row { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; }
+.prog-bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; } .prog-bar i { display: block; height: 100%; background: var(--accent); }
+.notice.rep { background: var(--bad-soft); border: 1px solid var(--bad); display: flex; flex-direction: column; gap: 6px; } .notice.rep strong { color: var(--bad); } .notice.rep p { margin: 0; }
+.rep-line { color: var(--bad); font-size: 14px; font-weight: 600; }
+.insbar .btn { padding: 11px 10px; white-space: nowrap; } .insbar .btn:not(.primary):not(:only-child) { flex: none; }
+.item.pulse { outline: 3px solid var(--accent); outline-offset: -3px; }
 @media (prefers-reduced-motion: no-preference) { .tpl, .row-main, .seg button { transition: background-color .12s; } }
 
 </style>
@@ -241,6 +271,8 @@ a.btn.primary { color: var(--accent-ink); }
 <body>
 <header class="top" id="topbar"></header>
 <main id="app"></main>
+<nav id="tabs" class="tabs" aria-label="Hovedmeny" hidden></nav>
+<div id="insbar" class="insbar" hidden></div>
 <div id="sheet" class="sheet" hidden></div>
 <div id="toast" class="toast" role="status" hidden></div>
 <div id="editor" class="editor" hidden>

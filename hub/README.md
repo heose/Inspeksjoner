@@ -57,6 +57,8 @@ Hub tillater bare kallene appen trenger mot tavlen Vaktmester. Bytter du token i
 3. Lim inn nyeste `hub/worker.js` og Deploy.
 **Én side per bygg (å8):** `melding.html?b=op`, `?b=vk`, `?b=svk`. Bygget kommer fra adressen og vises som merke. Kategorier: Arbeid i eget lokale, Arbeid i fellesareal, Skade/hærverk, og for SVK også Ny adgangsbrikke. Uten `b` vises et byggvalg. Bygg og kategorier er definert i `BYGG` og `CATS` i `worker.js` (id-ene er de samme som i `SITES` i content.js). Skade/hærverk og «Haster» gir Pushover-varsel med høy prioritet og etiketten «Prioritet høy» på Trello-kortet.
 
+**QR per lokale (å23):** `melding.html?b=op&l=Butikk%20A` velger «Arbeid i eget lokale» og fyller inn lokalet. Legg lenken inn under Del lenker og skjema i Argus og bruk Vis QR for å lage merket.
+
 Leietakerliste per bygg (valgfri, vises som forslag i «Hvilket lokale?»), lagres i Hub og ikke i repoet. Eksempel (bytt ut koden):
 `curl -X PUT "https://argus-hub.osebergdrift-2e2.workers.dev/melding/config?b=op" -H "x-argus-code: KODE" -H "content-type: application/json" -d '{"lokaler":["Butikk A","Kafé B"]}'`
 

@@ -148,6 +148,9 @@ const HUB = 'https://argus-hub.osebergdrift-2e2.workers.dev';
 const SITEKEY = '0x4AAAAAAFun1ABDhmebHsg6';
 const MAX_PICS = 3;
 const B = (new URLSearchParams(location.search).get('b') || '').toLowerCase();
+/* Lokale fra QR-merket i lokalet: melding.html?b=op&l=Butikk%20A. Fylles inn ferdig og kan endres. */
+const L = (new URLSearchParams(location.search).get('l') || '').replace(/\s+/g, ' ').trim().slice(0, 100);
+function preLokale() { if (!L) return; const r = document.querySelector('#cats input[value="lokale"]'); if (r) { r.checked = true; pickCat('lokale'); } }
 let CFG = null, CAT = '';
 const $ = s => document.querySelector(s);
 const pics = []; // { url, b64 }
@@ -228,6 +231,7 @@ $('#f').addEventListener('submit', async e => {
 $('#again').addEventListener('click', () => {
   $('#f').reset(); pics.length = 0; renderPics(); CAT = ''; $('#s2').hidden = true; $('#s3').hidden = true; $('#actions').hidden = true; $('#f').hidden = false; $('#lead').hidden = false; document.querySelector('.urgent').hidden = false; $('#done').hidden = true;
   if (window.turnstile && tsId !== null) window.turnstile.reset(tsId);
+  preLokale();
 });
 
 const TXT = {
@@ -241,6 +245,7 @@ function pickCat(id) {
   $('#whereLbl').textContent = t.where; $('#whereHint').textContent = t.hint; $('#whereHint').hidden = !t.hint; $('#textLbl').textContent = t.text;
   $('#where').setAttribute('list', id === 'lokale' ? 'lokaler' : '');
   $('#picsBox').hidden = id === 'brikke'; $('#urgentBox').hidden = id === 'brikke'; $('#urgent').checked = id === 'skade';
+  if (L) { const w = $('#where'); if (id === 'lokale') { w.value = L; $('#whereHint').textContent = 'Hentet fra QR-merket i lokalet. Endre hvis det ikke stemmer.'; $('#whereHint').hidden = false; } else if (w.value === L) w.value = ''; }
   $('#s2').hidden = false; $('#s3').hidden = false; $('#actions').hidden = false;
 }
 function showChooser(list, msg) {
@@ -265,7 +270,7 @@ async function loadConfig() {
       sp.append(st, sb); l.append(i, sp); box.appendChild(l);
     });
     const dl = $('#lokaler'); (j.lokaler || []).forEach(x => { const o = document.createElement('option'); o.value = x; dl.appendChild(o); });
-    $('#f').hidden = false;
+    $('#f').hidden = false; preLokale();
   } catch (e) {
     const er = $('#loaderr'); er.textContent = 'Fikk ikke kontakt. Sjekk nettet og last siden på nytt, eller ring oss.'; er.hidden = false;
   }
