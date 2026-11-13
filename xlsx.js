@@ -61,7 +61,7 @@ const XLSX = (() => {
       if (cells || ht) rows += `<row r="${r + 1}"${ht}>${cells}</row>`;
     });
     const fr = sh.freeze ? `<pane xSplit="${sh.freeze.c}" ySplit="${sh.freeze.r}" topLeftCell="${ref(sh.freeze.c, sh.freeze.r)}" activePane="bottomRight" state="frozen"/>` : '';
-    const cols = sh.cols ? `<cols>${sh.cols.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>` : '';
+    const cols = sh.cols && sh.cols.length ? `<cols>${sh.cols.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>` : '';
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetViews><sheetView workbookViewId="0"${sh.noGrid ? ' showGridLines="0"' : ''}>${fr}</sheetView></sheetViews><sheetFormatPr defaultRowHeight="13.5"/>${cols}<sheetData>${rows}</sheetData>${hasDrawing ? '<drawing r:id="rId1"/>' : ''}</worksheet>`;
   }
 
