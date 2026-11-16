@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Argus</title>
-<meta name="theme-color" content="#058479">
+<meta name="theme-color" content="#e4eceb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#081413" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -14,24 +15,36 @@
 <style>
 /* Feltverktøy: én kolonne, store trykkflater, signalfarger kun for status. */
 :root {
-  --bg: #edf1f3; --surface: #ffffff; --surface-2: #f5f7f8; --ink: #1b262c; --muted: #566874; --line: #d4dce1;
-  --accent: #058479; --accent-ink: #ffffff; --accent-soft: #dcf1ee;
+  --bg: #e4eceb; --surface: #fbfdfd; --surface-2: rgba(255,255,255,.72); --ink: #0e2321; --muted: #3f5552; --line: rgba(14,35,33,.12);
+  --accent: #058479; --accent-ink: #ffffff; --accent-soft: #d3ece8;
   --blue: #1d6fb8; --blue-soft: #e1eefa; --ok: #1a7a4c; --bad: #c0172f; --bad-soft: #fcebee; --na: #5e6c76; --warn: #9a6200; --warn-soft: #fbf0d9; --ok-soft: #e2f2e9;
   --act-bg: #fff5d1; --act-line: #e2bf3d; --act-ink: #5c4708;
-  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif;
-  --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, system-ui, sans-serif;
-  --r: 12px;
+  --glass: rgba(255,255,255,.55); --glass-strong: rgba(255,255,255,.74); --glass-line: rgba(255,255,255,.85);
+  --glass-shadow: 0 12px 30px rgba(30,70,70,.12), inset 0 1px 0 rgba(255,255,255,.9);
+  --blur: blur(22px) saturate(1.4); --seg-bg: rgba(14,35,33,.06); --seg-todo: rgba(14,35,33,.12);
+  --glow-1: rgba(5,132,121,.40); --glow-2: rgba(84,140,230,.30); --glow-3: rgba(240,190,120,.48);
+  --tag: #f2c230; --tag-ink: #241b00;
+  --ok-fill: #1a7a4c; --bad-fill: #c0172f; --na-fill: #5e6c76;   /* fylte knapper med hvit tekst (AA i begge temaer) */
+  --font: "Schibsted Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  --display: "Schibsted Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  --r: 20px;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0d1418; --surface: #162128; --surface-2: #1c2932; --ink: #e5edf1; --muted: #93a4ae; --line: #2a3a44;
+    --bg: #081413; --surface: #13201f; --surface-2: rgba(255,255,255,.08); --ink: #eaf3f1; --muted: #a6bcb8; --line: rgba(255,255,255,.12);
     --accent: #2fc2b2; --accent-ink: #06201d; --accent-soft: #14332f;
     --blue: #5aaaf0; --blue-soft: #14283b; --ok: #3daf74; --bad: #ee5a6e; --bad-soft: #3a1d23; --na: #7f8d96; --warn: #e3a743; --warn-soft: #36290f; --ok-soft: #15301f;
     --act-bg: #2e2812; --act-line: #8a7121; --act-ink: #f0d98a;
+    --glass: rgba(255,255,255,.07); --glass-strong: rgba(18,32,31,.78); --glass-line: rgba(255,255,255,.14);
+    --glass-shadow: 0 16px 38px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.12);
+    --seg-bg: rgba(255,255,255,.06); --seg-todo: rgba(255,255,255,.14);
+    --ok-fill: #1f7f50; --bad-fill: #c4223b; --na-fill: #5e6c76;
+    --glow-1: rgba(47,194,178,.30); --glow-2: rgba(84,120,230,.26); --glow-3: rgba(240,160,90,.18);
     color-scheme: dark;
   }
 }
+@font-face { font-family: "Schibsted Grotesk"; src: url("fonts/schibsted-grotesk.woff2") format("woff2"); font-weight: 400 900; font-style: normal; font-display: swap; }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
@@ -276,6 +289,82 @@ body.has-tabs .toast, body.has-insbar .toast { bottom: calc(88px + env(safe-area
 .item.pulse { outline: 3px solid var(--accent); outline-offset: -3px; }
 @media (prefers-reduced-motion: no-preference) { .tpl, .row-main, .seg button { transition: background-color .12s; } }
 
+
+/* ---------- Glass (designretning B, godkjent 16.11.2026). Se DESIGN.md. Bare utseende, ingen funksjon. ---------- */
+body::after { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: radial-gradient(55% 32% at 8% 4%, var(--glow-1), transparent 70%), radial-gradient(50% 30% at 100% 40%, var(--glow-2), transparent 70%), radial-gradient(60% 34% at 40% 104%, var(--glow-3), transparent 70%); }
+body::before { background: var(--glass-strong); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); }
+.top { background: var(--glass-strong); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); border-bottom-color: var(--line); }
+.brand-name { font-size: 34px; font-weight: 850; letter-spacing: -0.03em; }
+.brand-co { text-transform: none; letter-spacing: 0; font-size: 14px; }
+.brand-co::first-letter { text-transform: uppercase; }
+.h2, .fold-t { text-transform: none; letter-spacing: -0.01em; font-size: 18px; font-weight: 750; color: var(--ink); }
+.sub { text-transform: none; letter-spacing: 0; font-size: 15px; font-weight: 700; color: var(--ink); }
+.fld span { text-transform: none; letter-spacing: 0; font-size: 13px; }
+.act-tag { text-transform: none; letter-spacing: 0; font-size: 14px; }
+
+.panel, .tpl, .mrow, .row-card, .act-line, .linkcard, .sitebtn, .fold, .anl, .grp, .sec, .empty, .qr-card {
+  background: var(--glass); border: 1px solid var(--glass-line); box-shadow: var(--glass-shadow); border-radius: var(--r); }
+.empty { border-style: dashed; border-color: var(--line); box-shadow: none; }
+.panel, .sec { -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); }
+.act-line.prio-hoy { background: color-mix(in srgb, var(--bad) 12%, transparent); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
+.act-line.prio-mid { background: color-mix(in srgb, var(--warn) 12%, transparent); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.act-line.prio-lav { background: color-mix(in srgb, var(--blue) 12%, transparent); border-color: color-mix(in srgb, var(--blue) 40%, transparent); }
+.tpl:active, .row-main:active, button.mrow:active, .sitebtn:active, .fold:active, .anl:active, .gr:active { background: var(--glass-strong); }
+.gr { border-top-color: var(--line); }
+
+.sec { border-radius: 26px; }
+.sec-h { background: transparent; border-bottom: 0; padding: 14px 18px 4px; }
+.sec-h h2 { font-size: 18px; font-weight: 750; letter-spacing: -0.01em; }
+.item { border-top-color: var(--line); padding: 14px 18px; }
+.item.is-flag { background: color-mix(in srgb, var(--bad) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bad) 28%, transparent); border-radius: 20px; margin: 4px 8px; padding: 12px 10px; border-top-color: transparent; }
+.item.pulse { outline: 0; box-shadow: inset 0 0 0 2px var(--accent); border-radius: 20px; }
+.info { background: transparent; border-top-color: var(--line); padding: 12px 18px; }
+.sub { padding: 14px 18px 2px; }
+
+.seg { padding: 4px; gap: 4px; background: var(--seg-bg); border-radius: 18px; grid-template-columns: repeat(auto-fit, minmax(66px, 1fr)); }
+.seg button { border: 0; background: transparent; border-radius: 14px; min-height: 48px; padding: 0 4px; white-space: nowrap; }
+.seg button[aria-pressed="true"] { box-shadow: 0 6px 14px rgba(0,0,0,.16); }
+.tool { border: 1px solid var(--glass-line); background: var(--glass-strong); border-radius: 20px; min-height: 40px; padding: 6px 14px; }
+.tool.prompt { background: var(--tag); color: var(--tag-ink); border-color: transparent; box-shadow: 0 6px 14px rgba(160,120,0,.22); }
+.act { border-radius: 16px; }
+.thumb, .ib-pics img { border-radius: 12px; }
+
+.btn { border-radius: 16px; border-color: var(--glass-line); background: var(--glass-strong); }
+.btn.primary { background: var(--accent); border-color: var(--accent); box-shadow: 0 8px 18px color-mix(in srgb, var(--accent) 30%, transparent); }
+.btn.big { border-radius: 27px; }
+.btn.inbox-card { background: var(--tag); color: var(--tag-ink); border-radius: 22px; box-shadow: 0 12px 26px rgba(120,90,0,.18); }
+.btn.inbox-card .inbox-n { background: var(--tag-ink); color: var(--tag); }
+.btn.avvik-big { background: var(--bad-fill); border-color: var(--bad-fill); color: #fff; }
+.seg button[data-tone="ok"] { background: var(--ok-fill); } .seg button[data-tone="bad"] { background: var(--bad-fill); } .seg button[data-tone="na"] { background: var(--na-fill); }
+.btn.start { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); border-radius: 22px; padding-inline: 18px; }
+.avvik-big { border-radius: 27px; border-color: var(--bad); box-shadow: 0 12px 26px color-mix(in srgb, var(--bad) 32%, transparent); }
+.ghost-sm { background: var(--glass-strong); border-color: var(--glass-line); }
+.fld input, .fld select, .inp, .avf select { border-radius: 14px; border-color: var(--line); background: var(--surface-2); }
+.notice { border-radius: var(--r); }
+
+.tabs { left: 12px; right: 12px; bottom: calc(10px + env(safe-area-inset-bottom, 0px)); padding: 6px; border-radius: 32px; border: 1px solid var(--glass-line);
+  background: var(--glass-strong); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); box-shadow: var(--glass-shadow); }
+.tab { border-radius: 26px; }
+.tab[aria-current="page"] { background: var(--ink); color: var(--bg); }
+.tab .badge { top: 4px; }
+.fabbar { background: transparent; bottom: calc(82px + env(safe-area-inset-bottom, 0px)); }
+.fab-space { height: 64px; }
+.insbar { left: 12px; right: 12px; bottom: calc(10px + env(safe-area-inset-bottom, 0px)); padding: 6px; gap: 6px; border-radius: 32px; border: 1px solid var(--glass-line);
+  background: var(--glass-strong); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); box-shadow: var(--glass-shadow); }
+.insbar .btn { border-radius: 26px; min-height: 52px; }
+.insbar .btn:not(.primary) { background: transparent; border-color: transparent; }
+body.has-tabs { padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px)); }
+body.has-insbar { padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px)); }
+body.has-tabs .toast, body.has-insbar .toast { bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+
+.prog { background: var(--glass-strong); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); border-bottom-color: var(--line); }
+.prog-bar { background: var(--seg-todo); }
+.prog-segs { display: grid; gap: 3px; height: 8px; }
+.prog-segs i { border-radius: 4px; background: var(--seg-todo); }
+.prog-segs i.ok { background: var(--ok); } .prog-segs i.bad { background: var(--bad); } .prog-segs i.na { background: var(--na); }
+.sheet-card { border-radius: 26px 26px 0 0; }
+.qr-card { background: var(--surface); }
 </style>
 </head>
 <body>

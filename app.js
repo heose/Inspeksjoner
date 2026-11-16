@@ -24,7 +24,7 @@ const COUNTED = ['yn', 'ok', 'okm', 'choice', 'multi', 'number', 'photo'];   // 
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-16 å25';
+const APP_VERSION = '2026-11-16 glass';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -138,6 +138,7 @@ function secVisible(sec, ins) {
 }
 function itemVisible(it, ins, prefix) {
   const c = it.showIf; if (!c) return true;
+  if (c.answered) { const w = ins.answers[prefix + '.' + it.id]?.value; return w != null && w !== ''; }   // gammelt punkt: vises bare i eldre inspeksjoner som har svar på det
   if (c.cold || c.months) { const m = +(ins.date || todayISO()).slice(5, 7); return c.months ? c.months.includes(m) : (m >= 9 || m <= 4); }   // kuldeperiode (sept–april) eller egne måneder, etter inspeksjonsdatoen
   const v = ins.answers[prefix + '.' + c.item]?.value;
   if ('eq' in c) return v === c.eq;
@@ -207,6 +208,14 @@ function meterCheck(ins, it, key) {
   if (r.diff < 0 && !it.calc) r.level = 'low';   // netto VV er differansen mellom to målere og kan synke litt (måletoleranse), så bare rene målere varsles
   else if (r.typical != null && r.diff > r.typical * 2.5 && r.diff - r.typical >= 8) r.level = 'high';
   return r;
+}
+/* Tall med dev: endring mot forrige som er større enn ±dev er en merknad (ikke avvik). Brukes for sprinklertrykk. */
+function devHint(ins, it, key) {
+  const p = numOf(prevValue(ins, key)), v = numOf(ins.answers[key]?.value), u = it.unit ? ' ' + it.unit : '';
+  if (p == null || v == null) return '';
+  const d = Math.round((v - p) * 100) / 100;
+  if (Math.abs(d) <= it.dev) return `<span class="muted small">Innenfor ±${String(it.dev).replace('.', ',')}${esc(u)} fra forrige</span>`;
+  return `<span class="t-warn small">${d > 0 ? '+' : ''}${String(d).replace('.', ',')}${esc(u)} siden forrige. Mer enn ±${String(it.dev).replace('.', ',')}${esc(u)}: skriv mulig årsak i notat.</span>`;
 }
 function meterHint(ins, it, key) {
   const c = meterCheck(ins, it, key), u = esc(it.unit || ''); let h = '';
@@ -942,7 +951,21 @@ function overviewHTML(ins, sec) {
 const insBarOn = () => { const i = S.view === 'ins' ? cur() : null; return !!i && i.status !== 'complete' && i.templateId !== 'avvik' && !!TPL[i.templateId]; };
 function progHTML(st) {
   const done = st.total - st.unanswered, pct = st.total ? Math.round(done / st.total * 100) : 0;
-  return `<div class="prog-row"><b>${done} av ${st.total} besvart</b><span class="${st.flags ? 't-bad' : 'muted'}">${st.flags} avvik</span></div><div class="prog-bar" role="progressbar" aria-label="Fremdrift" aria-valuemin="0" aria-valuemax="${st.total}" aria-valuenow="${done}"><i style="width:${pct}%"></i></div>`;
+  const aria = `role="progressbar" aria-label="Fremdrift" aria-valuemin="0" aria-valuemax="${st.total}" aria-valuenow="${done}"`, segs = progSegs(cur());
+  const bar = segs.length && segs.length <= 48   // én stolpe per punkt: grønn ok, rød avvik, grå N/A, tom ubesvart
+    ? `<div class="prog-segs" ${aria} style="grid-template-columns:repeat(${segs.length},minmax(0,1fr))">${segs.map(c => `<i class="${c}"></i>`).join('')}</div>`
+    : `<div class="prog-bar" ${aria}><i style="width:${pct}%"></i></div>`;
+  return `<div class="prog-row"><b>${done} av ${st.total} besvart</b><span class="${st.flags ? 't-bad' : 'muted'}">${st.flags} avvik</span></div>${bar}`;
+}
+function progSegs(ins) {
+  if (!ins || !TPL[ins.templateId]) return [];
+  const out = [];
+  for (const x of walk(TPL[ins.templateId], ins)) {
+    if (!COUNTED.includes(x.it.type) || x.it.opt) continue;
+    const a = ins.answers[x.key];
+    out.push(!hasAnswer(x.it, a) ? '' : isFlag(x.it, a) ? 'bad' : x.it.type !== 'photo' && toneFor(x.it, a.value) === 'na' ? 'na' : 'ok');
+  }
+  return out;
 }
 function insBarHTML(st) {
   return st.unanswered ? `<button class="btn primary" data-act="next-open">Neste ubesvarte (${st.unanswered} igjen)</button><button class="btn" data-act="go-finish">Til fullføring</button>`
@@ -997,7 +1020,7 @@ function itemHTML(ins, it, key) {
   } else if (it.type === 'number') {
     const prev = prevValue(ins, key);
     const lt = limitText(it);
-    ctl = `<div class="numrow"><input class="inp num" id="n-${k}" type="text" inputmode="decimal" data-bind="${k}" data-field="value" value="${esc(a.value ?? '')}" placeholder="0,0" autocomplete="off"><span class="unit">${esc(it.unit || '')}</span>${prev != null && !lt ? `<span class="prev">Forrige: ${esc(String(prev).replace('.', ','))} ${esc(it.unit || '')}</span>` : ''}${lt ? `<span class="small ${flag ? 't-bad' : 'muted'}" data-lim="${k}">${esc(lt)}</span>` : ''}</div>`;
+    ctl = `<div class="numrow"><input class="inp num" id="n-${k}" type="text" inputmode="decimal" data-bind="${k}" data-field="value" value="${esc(a.value ?? '')}" placeholder="0,0" autocomplete="off"><span class="unit">${esc(it.unit || '')}</span>${prev != null && !lt ? `<span class="prev">Forrige: ${esc(String(prev).replace('.', ','))} ${esc(it.unit || '')}</span>` : ''}${lt ? `<span class="small ${flag ? 't-bad' : 'muted'}" data-lim="${k}">${esc(lt)}</span>` : ''}</div>${it.dev ? `<div class="mh" data-dv="${k}">${devHint(ins, it, key)}</div>` : ''}`;
   } else if (it.type === 'photo') {
     ctl = `<button type="button" class="btn${photos.length ? '' : ' primary'} photo-btn" data-act="photo" data-key="${k}">${photos.length ? '+ Ta flere bilder' : 'Ta bilde'}</button>`;
   } else if (it.type === 'text') {
@@ -1240,6 +1263,7 @@ function liveItem(ins, key) {
     document.getElementById('it-' + key)?.classList.toggle('is-flag', bad);
     const l = document.querySelector(`[data-lim="${CSS.escape(key)}"]`); if (l) { l.classList.toggle('t-bad', bad); l.classList.toggle('muted', !bad); }
   }
+  if (it.type === 'number' && it.dev) { const d = document.querySelector(`[data-dv="${CSS.escape(key)}"]`); if (d) d.innerHTML = devHint(ins, it, key); }
   if (sec?.repeat && sec.nameItem === it.id) {
     const p = key.split('.')[0], name = instName(sec, ins, +p.split('#')[1]);
     for (const e of document.querySelectorAll(`[data-inst="${CSS.escape(p)}"],[data-ovw="${CSS.escape(p)}"]`)) e.textContent = name;
