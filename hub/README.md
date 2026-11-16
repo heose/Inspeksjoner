@@ -93,3 +93,13 @@ Egen side i Argus («Del lenker og skjema» på forsiden). Lenker til deling få
 - Vil flere ha varselet, lag en gruppe i Pushover og legg gruppenøkkelen i `PUSHOVER_USER`.
 - Gratisgrensen for KV er 1 000 skrivinger og 1 000 list-kall per dag. Dette bruker ca. 1 skriving per handling og ett list-kall per synk.
 - Lim inn hele `hub/worker.js` på nytt under Edit code og Deploy. Appen virker også mot gammel Hub, men uten delte handlinger.
+
+## Legionellaspyling og leietakeroversikt (å25)
+
+Mal i `hub/maler/legionellaspyling.js` (ingen private data). Lim funksjonen inn i `content.js`, legg til `legionella('leg_xx', 'Byggnavn', 'xx', ['Leietaker 1', 'Leietaker 2'])` i `TEMPLATES` og id-en i `tpls` for bygget, og last opp innholdsfilen. Halvårlig (`months: 6`).
+
+Nye egenskaper i sjekklister (kan brukes i alle maler):
+- `type: 'photo'` – punkt som er besvart når det har minst ett bilde (f.eks. termometer før spyling). `opt: true` gjør det valgfritt.
+- `min` / `max` på `type: 'number'` – verdi utenfor grensen blir avvik (rødt i skjema og PDF, med «Krav: minst 65 °C»).
+- Gjentatt seksjon med `nameItem: 'navn'` – overskriften viser navnet (f.eks. leietakeren) i stedet for «Leietaker 3». `names: [...]` er listen første gang; senere runder starter med leietakerne fra forrige fullførte runde.
+- `overview: ['status', 'antall', ...]` – oversikt øverst i seksjonen med én rad per leietaker (status, valgte svar, avvik), og tabell i PDF. `short` på et punkt gir kort kolonnenavn. `overviewTitle` gir egen tittel.
