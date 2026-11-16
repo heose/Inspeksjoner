@@ -19,11 +19,12 @@ const TYPES = {
   yn:  { opts: ['Ja', 'Nei', 'N/A'], flag: ['Nei'] },
 };
 const CHOICE_TYPES = ['yn', 'ok', 'okm', 'choice'];
+const COUNTED = ['yn', 'ok', 'okm', 'choice', 'multi', 'number', 'photo'];   // punkter som teller i fremdrift (photo: besvart når det har bilde)
 
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-13 å24';
+const APP_VERSION = '2026-11-16 å25';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -111,8 +112,17 @@ const deadlineOf = (it, v) => !isoOk(v) ? null : it.expiry ? v : it.yearly ? add
 function isFlag(it, a) {
   if (!a || a.value == null || a.value === '') return false;
   if (it.type === 'date') { const dl = deadlineOf(it, a.value); return !!dl && dl < todayISO(); }
+  if (it.type === 'number') return limitBad(it, a.value);
   return flagsOf(it).includes(a.value);
 }
+/* Tallpunkt med grense (min/max, f.eks. temperatur minst 65 °C) blir avvik utenfor grensen */
+function limitBad(it, v) {
+  if (it.min == null && it.max == null) return false;
+  const n = numOf(v); return n != null && ((it.min != null && n < it.min) || (it.max != null && n > it.max));
+}
+const limitText = it => { const u = it.unit ? ' ' + it.unit : ''; return it.min != null && it.max != null ? `Krav: ${it.min}–${it.max}${u}` : it.min != null ? `Krav: minst ${it.min}${u}` : it.max != null ? `Krav: høyst ${it.max}${u}` : ''; };
+/* Besvart: bildepunkt når det har minst ett bilde, ellers når det har en verdi */
+const hasAnswer = (it, a) => it.type === 'photo' ? !!(a?.photos || []).length : !(a?.value == null || a.value === '' || (Array.isArray(a.value) && !a.value.length));
 function toneFor(it, v) {
   if (isFlag(it, { value: v })) return 'bad';
   if (v === 'N/A' || v === 'Merknad' || it.neutral) return 'na';
@@ -136,6 +146,9 @@ function itemVisible(it, ins, prefix) {
 }
 const instCount = (sec, ins) => sec.repeat ? (ins.repeats?.[sec.id] ?? sec.defaultCount ?? 1) : 1;
 const prefixOf = (sec, i) => sec.repeat ? sec.id + '#' + i : sec.id;
+/* Navn på en gjentatt del: verdien i nameItem (f.eks. leietakernavnet), ellers «Leietaker 3» */
+const instName = (sec, ins, i) => { const v = sec.nameItem && ins.answers[prefixOf(sec, i) + '.' + sec.nameItem]?.value; return (v && String(v).trim()) || `${sec.unit} ${i + 1}`; };
+const secLabel = (sec, ins, i) => sec.title + (sec.repeat ? ' – ' + instName(sec, ins, i) : '');
 function* walk(tpl, ins) {
   for (const sec of tpl.sections) {
     if (!secVisible(sec, ins)) continue;
@@ -155,11 +168,10 @@ function stats(ins) {
     const acts = a?.actions || [];
     r.actions += acts.length; r.open += acts.filter(z => !z.done).length;
     r.photos += (a?.photos || []).length + acts.reduce((n, z) => n + (z.photos || []).length, 0);
-    if (['yn', 'ok', 'okm', 'choice', 'multi', 'number'].includes(x.it.type)) {
+    if (COUNTED.includes(x.it.type)) {
       if (!x.it.opt) {
         r.total++;
-        const v = a?.value;
-        if (v == null || v === '' || (Array.isArray(v) && !v.length)) r.unanswered++;
+        if (!hasAnswer(x.it, a)) r.unanswered++;
       }
       if ((x.it.meter || x.it.calc) && ins.status !== 'complete' && meterCheck(ins, x.it, x.key).level) r.warn++;
     }
@@ -507,6 +519,13 @@ function newInspection(tid) {
   if (prev) for (const sec of t.sections) for (const it of sec.items) if (it.carry) {
     const k = prefixOf(sec, 0) + '.' + it.id, v = prev.answers[k]?.value;
     if (v) ins.answers[k] = { value: v };
+  }
+  // Gjentatte deler med navn (leietakere): samme liste som forrige runde, ellers listen i sjekklisten (sec.names)
+  for (const sec of t.sections) if (sec.repeat && sec.nameItem) {
+    const names = prev ? Array.from({ length: instCount(sec, prev) }, (_, i) => prev.answers[prefixOf(sec, i) + '.' + sec.nameItem]?.value || '') : (sec.names || []);
+    if (!names.some(Boolean)) continue;
+    ins.repeats[sec.id] = names.length;
+    names.forEach((v, i) => { if (v) ins.answers[prefixOf(sec, i) + '.' + sec.nameItem] = { value: v }; });
   }
   S.ins[ins.id] = ins; flush(ins.id);
   openIns(ins.id);
@@ -865,9 +884,10 @@ function renderIns() {
   for (const sec of tpl.sections) {
     if (!secVisible(sec, ins)) continue;
     const n = instCount(sec, ins);
+    if (sec.repeat && sec.overview) h += overviewHTML(ins, sec);
     for (let i = 0; i < n; i++) {
       const p = prefixOf(sec, i);
-      h += `<section class="sec"><header class="sec-h"><h2>${esc(sec.title)}${sec.repeat ? ` <span class="inst">${esc(sec.unit)} ${i + 1}</span>` : ''}</h2>${sec.repeat && n > 1 && i === n - 1 ? `<button class="link danger" data-act="rep-del" data-sec="${sec.id}">Fjern ${esc(sec.unit.toLowerCase())}</button>` : ''}</header><div class="items">`;
+      h += `<section class="sec" id="inst-${esc(p)}"><header class="sec-h"><h2>${esc(sec.title)}${sec.repeat ? ` <span class="inst" data-inst="${esc(p)}">${esc(instName(sec, ins, i))}</span>` : ''}</h2>${sec.repeat && n > 1 && i === n - 1 ? `<button class="link danger" data-act="rep-del" data-sec="${sec.id}">Fjern ${esc(sec.unit.toLowerCase())}</button>` : ''}</header><div class="items">`;
       for (const it of sec.items) if (itemVisible(it, ins, p)) h += itemHTML(ins, it, p + '.' + it.id);
       h += '</div></section>';
     }
@@ -888,8 +908,37 @@ function renderIns() {
   return h;
 }
 
+/* Oversikt over gjentatte deler (f.eks. leietakere): navn, utvalgte svar og status per rad. Trykk går til raden. */
+function instState(ins, sec, i) {
+  const p = prefixOf(sec, i); let total = 0, done = 0, flags = 0;
+  for (const it of sec.items) {
+    if (!itemVisible(it, ins, p) || it.type === 'heading' || it.type === 'info') continue;
+    const a = ins.answers[p + '.' + it.id];
+    if (isFlag(it, a)) flags++;
+    if (COUNTED.includes(it.type) && !it.opt) { total++; if (hasAnswer(it, a)) done++; }
+  }
+  return { p, total, done, flags, st: flags ? 'bad' : done === total && total ? 'ok' : done ? 'warn' : 'na' };
+}
+const ovwVal = (it, a) => {
+  if (!a) return '';
+  if (it.type === 'photo') { const n = (a.photos || []).length; return n ? (n === 1 ? '1 bilde' : n + ' bilder') : ''; }
+  if (a.value == null || a.value === '') return '';
+  if (Array.isArray(a.value)) return a.value.join(', ');
+  return it.type === 'number' ? String(a.value).replace('.', ',') + (it.unit ? ' ' + it.unit : '') : String(a.value);
+};
+function overviewHTML(ins, sec) {
+  const n = instCount(sec, ins), rows = []; let ferdig = 0, avvik = 0;
+  const cols = sec.overview.map(id => sec.items.find(it => it.id === id)).filter(Boolean);
+  for (let i = 0; i < n; i++) {
+    const s = instState(ins, sec, i); if (s.st === 'ok') ferdig++; if (s.flags) avvik++;
+    const vals = cols.map(it => { const a = ins.answers[s.p + '.' + it.id], v = ovwVal(it, a); return v ? `<span class="ovw-v${isFlag(it, a) ? ' t-bad' : ''}">${esc(it.short || it.label)}: <b>${esc(v)}</b></span>` : ''; }).filter(Boolean).join('');
+    const lab = s.st === 'ok' ? 'Ferdig' : s.st === 'bad' ? (s.flags === 1 ? '1 avvik' : s.flags + ' avvik') : s.done ? `${s.done} av ${s.total}` : 'Ikke startet';
+    rows.push(`<button type="button" class="ovw-row" data-act="ovw-go" data-p="${esc(s.p)}"><span class="dot ${s.st === 'ok' ? 'ok' : s.st === 'bad' ? 'bad' : s.st === 'warn' ? 'warn' : 'na'}"></span><span class="ovw-main"><span class="ovw-name" data-ovw="${esc(s.p)}">${esc(instName(sec, ins, i))}</span>${vals ? `<span class="ovw-vals">${vals}</span>` : ''}</span><span class="pill ${s.st === 'ok' ? 'ok' : s.st === 'bad' ? 'bad' : s.st === 'warn' ? 'warn' : 'na'}">${lab}</span></button>`);
+  }
+  return `<section class="panel ovw"><h2 class="h3">${esc(sec.overviewTitle || sec.unit + 'oversikt')}</h2><p class="muted small">${ferdig} av ${n} ferdig${avvik ? ` · <span class="t-bad">${avvik} med avvik</span>` : ''}. Trykk på en rad for å gå dit.</p><div class="ovw-list">${rows.join('')}</div></section>`;
+}
+
 /* Fremdrift øverst og fast linje nederst mens en runde pågår. Ikke for avviksmelding eller fullførte. */
-const COUNTED = ['yn', 'ok', 'okm', 'choice', 'multi', 'number'];
 const insBarOn = () => { const i = S.view === 'ins' ? cur() : null; return !!i && i.status !== 'complete' && i.templateId !== 'avvik' && !!TPL[i.templateId]; };
 function progHTML(st) {
   const done = st.total - st.unanswered, pct = st.total ? Math.round(done / st.total * 100) : 0;
@@ -907,8 +956,7 @@ function unansweredKeys(ins) {
   const out = [];
   for (const x of walk(TPL[ins.templateId], ins)) {
     if (!COUNTED.includes(x.it.type) || x.it.opt) continue;
-    const v = ins.answers[x.key]?.value;
-    if (v == null || v === '' || (Array.isArray(v) && !v.length)) out.push(x.key);
+    if (!hasAnswer(x.it, ins.answers[x.key])) out.push(x.key);
   }
   return out;
 }
@@ -948,7 +996,10 @@ function itemHTML(ins, it, key) {
     ctl = `<div class="numrow"><input class="inp num" id="n-${k}" type="text" inputmode="numeric" data-bind="${k}" data-field="value" value="${esc(a.value ?? '')}" placeholder="0" autocomplete="off"><span class="unit">${esc(it.unit || '')}</span>${it.opt ? '<span class="muted small">valgfri, tom = 0</span>' : ''}</div><div class="mh" data-mh="${k}">${meterHint(ins, it, key)}</div>`;
   } else if (it.type === 'number') {
     const prev = prevValue(ins, key);
-    ctl = `<div class="numrow"><input class="inp num" id="n-${k}" type="text" inputmode="decimal" data-bind="${k}" data-field="value" value="${esc(a.value ?? '')}" placeholder="0,0" autocomplete="off"><span class="unit">${esc(it.unit || '')}</span>${prev != null ? `<span class="prev">Forrige: ${esc(String(prev).replace('.', ','))} ${esc(it.unit || '')}</span>` : ''}</div>`;
+    const lt = limitText(it);
+    ctl = `<div class="numrow"><input class="inp num" id="n-${k}" type="text" inputmode="decimal" data-bind="${k}" data-field="value" value="${esc(a.value ?? '')}" placeholder="0,0" autocomplete="off"><span class="unit">${esc(it.unit || '')}</span>${prev != null && !lt ? `<span class="prev">Forrige: ${esc(String(prev).replace('.', ','))} ${esc(it.unit || '')}</span>` : ''}${lt ? `<span class="small ${flag ? 't-bad' : 'muted'}" data-lim="${k}">${esc(lt)}</span>` : ''}</div>`;
+  } else if (it.type === 'photo') {
+    ctl = `<button type="button" class="btn${photos.length ? '' : ' primary'} photo-btn" data-act="photo" data-key="${k}">${photos.length ? '+ Ta flere bilder' : 'Ta bilde'}</button>`;
   } else if (it.type === 'text') {
     ctl = `<input class="inp" id="t-${k}" data-bind="${k}" data-field="value" value="${esc(a.value ?? '')}">`;
   } else if (it.type === 'date') {
@@ -964,7 +1015,7 @@ function itemHTML(ins, it, key) {
     ${ctl}${repH}${note}${thumbs}${actsH}
     ${it.calc ? '' : `<div class="tools">
       <button type="button" class="tool" data-act="note" data-key="${k}">${a.note != null ? 'Skjul notat' : 'Notat'}</button>
-      <button type="button" class="tool" data-act="photo" data-key="${k}">Bilde</button>
+      ${it.type === 'photo' ? '' : `<button type="button" class="tool" data-act="photo" data-key="${k}">Bilde</button>`}
       <button type="button" class="tool${want && !acts.length ? ' prompt' : ''}" data-act="act-add" data-key="${k}">+ Handling</button>
     </div>`}</div>`;
 }
@@ -1084,6 +1135,7 @@ document.addEventListener('click', async e => {
       touch(ins); break;
     }
     case 'photo': S.pickKey = key; S.pickAid = null; $('#filepick').click(); break;
+    case 'ovw-go': { const el = document.getElementById('inst-' + b.dataset.p); if (el) el.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); break; }
     case 'thumb': openEditor(key, +b.dataset.ix, b.dataset.aid || null); break;
     case 'act-photo': S.pickKey = key; S.pickAid = b.dataset.aid; $('#filepick').click(); break;
     case 'act-move': {
@@ -1179,6 +1231,20 @@ function arm(b, label) {
   setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = old; b.classList.remove('armed'); } }, 3500);
 }
 
+/* Uten ny opptegning (beholder fokus): avviksmarkering for tall med grense og navn på leietaker i overskrift og oversikt */
+function liveItem(ins, key) {
+  const tpl = TPL[ins.templateId]; if (!tpl) return;
+  const { sec, it } = findItem(tpl, key); if (!it) return;
+  if (it.type === 'number' && (it.min != null || it.max != null)) {
+    const bad = isFlag(it, ins.answers[key]);
+    document.getElementById('it-' + key)?.classList.toggle('is-flag', bad);
+    const l = document.querySelector(`[data-lim="${CSS.escape(key)}"]`); if (l) { l.classList.toggle('t-bad', bad); l.classList.toggle('muted', !bad); }
+  }
+  if (sec?.repeat && sec.nameItem === it.id) {
+    const p = key.split('.')[0], name = instName(sec, ins, +p.split('#')[1]);
+    for (const e of document.querySelectorAll(`[data-inst="${CSS.escape(p)}"],[data-ovw="${CSS.escape(p)}"]`)) e.textContent = name;
+  }
+}
 document.addEventListener('input', e => {
   const el = e.target; const ins = cur();
   if (el.dataset.trello) { const t = S.settings.trello; t[el.dataset.trello] = el.value.trim(); t.members = null; saveSettings(); return; }
@@ -1196,7 +1262,7 @@ document.addEventListener('input', e => {
   if (el.dataset.bind) {
     const a = A(ins, el.dataset.bind);
     if (el.dataset.field === 'value') a.value = el.value === '' ? null : el.value; else a.note = el.value;
-    if (el.dataset.field === 'value') refreshMeters(ins);
+    if (el.dataset.field === 'value') { refreshMeters(ins); liveItem(ins, el.dataset.bind); }
     touch(ins); return;
   }
   if (el.dataset.actf && el.type !== 'checkbox') {
@@ -1379,7 +1445,7 @@ async function buildReport(ins) {
   let y = TOP;
   const items = [...walk(tpl, ins)];
   const st = stats(ins);
-  const secTitle = x => x.sec.title + (x.sec.repeat ? ` – ${x.sec.unit} ${x.i + 1}` : '');
+  const secTitle = x => secLabel(x.sec, ins, x.i);
 
   // Bilder: nummereres i rekkefølge, vises store på slutten
   const pnum = {}, pinfo = {}; let pc = 0;
@@ -1431,7 +1497,8 @@ async function buildReport(ins) {
       const a = ins.answers[x.key] || {}, ith = thumbsOf(a.photos || []);
       const hl = d.wrap(`${secTitle(x)}  ›  ${x.it.label}`, 10, true, CW - 10);
       const val = a.value != null && a.value !== '' ? (Array.isArray(a.value) ? a.value.join(', ') : String(a.value)) : '';
-      const vl = val && x.it.type === 'date' && isFlag(x.it, a) ? d.wrap('Svar: ' + fmt(val), 9, false, CW - 10) : [];
+      const vl = val && x.it.type === 'date' && isFlag(x.it, a) ? d.wrap('Svar: ' + fmt(val), 9, false, CW - 10)
+        : val && x.it.type === 'number' && isFlag(x.it, a) ? d.wrap(`Målt: ${val.replace('.', ',')}${x.it.unit ? ' ' + x.it.unit : ''}  (${limitText(x.it).toLowerCase()})`, 9, false, CW - 10) : [];
       const nl = a.note ? d.wrap(a.note, 9, false, CW - 10) : [];
       const al = (a.actions || []).map(z => ({ t: d.wrap(z.text || '(uten beskrivelse)', 9.5, false, CW - 10), meta: ['Ansvarlig ' + (z.who || '-'), 'Prioritet ' + (z.prio || '-'), 'Frist ' + (z.due ? fmt(z.due) : '-')].concat(z.done ? ['Utført'] : []).join('   ·   ') }));
       (a.actions || []).forEach((z, zi) => { al[zi].th = thumbsOf(z.photos || []); al[zi].thH = thumbH(al[zi].th); });
@@ -1455,6 +1522,36 @@ async function buildReport(ins) {
     d.circle(M + 6.5, y + 5.5, 3, RC.ok); d.path([[M + 5, y + 5.6], [M + 6.2, y + 6.9], [M + 8.2, y + 4.2]], RC.white, 0.5);
     d.text('Ingen avvik eller handlinger registrert', M + 12, y + 6.6, { size: 10.5, bold: true, color: RC.ok });
     y += 17;
+  }
+
+  // ----- Oversikt over gjentatte deler (leietakeroversikt): én linje per leietaker -----
+  const fit = (t, size, bold, w) => { t = String(t); if (d.width(t, size, bold) <= w) return t; while (t.length > 1 && d.width(t + '…', size, bold) > w) t = t.slice(0, -1); return t + '…'; };
+  for (const sec of tpl.sections) {
+    if (!sec.repeat || !sec.overview || !secVisible(sec, ins)) continue;
+    const n = instCount(sec, ins); if (!n) continue;
+    const cols = sec.overview.map(id => sec.items.find(it => it.id === id)).filter(Boolean);
+    const nameW = Math.min(62, CW * 0.36), stW = 22, cw = (CW - nameW - stW) / Math.max(cols.length, 1), RH = 6.6;
+    const head = () => {
+      d.rect(M, y, CW, RH, RC.tint);
+      d.text(sec.unit, M + 2, y + 4.5, { size: 8, bold: true, color: RC.muted });
+      cols.forEach((it, ci) => d.text(fit(it.short || it.label, 8, true, cw - 2), M + nameW + ci * cw + 1, y + 4.5, { size: 8, bold: true, color: RC.muted }));
+      d.text('Status', W - M - 2, y + 4.5, { size: 8, bold: true, color: RC.muted, align: 'right' });
+      y += RH;
+    };
+    need(14 + RH * Math.min(n, 3));
+    d.text(sec.overviewTitle || sec.unit + 'oversikt', M, y + 3, { size: 11, bold: true, color: RC.ink }); y += 6;
+    head();
+    for (let i = 0; i < n; i++) {
+      if (y + RH > BOT) { d.addPage(); y = TOP; head(); }
+      const s = instState(ins, sec, i);
+      if (s.flags) { d.rect(M, y, CW, RH, RC.badBg); d.rect(M, y, 1.1, RH, RC.bad); }
+      d.text(fit(instName(sec, ins, i), 9, true, nameW - 4), M + 2.5, y + 4.6, { size: 9, bold: true, color: RC.ink });
+      cols.forEach((it, ci) => { const a = ins.answers[s.p + '.' + it.id], bad = isFlag(it, a); d.text(fit(ovwVal(it, a).replace('³', '3') || '–', 9, bad, cw - 2), M + nameW + ci * cw + 1, y + 4.6, { size: 9, bold: bad, color: bad ? RC.bad : RC.ink }); });
+      const lab = s.st === 'ok' ? 'Ferdig' : s.st === 'bad' ? 'Avvik' : s.done ? `${s.done} av ${s.total}` : 'Ikke startet';
+      d.text(lab, W - M - 2, y + 4.6, { size: 8.5, bold: true, color: s.st === 'ok' ? RC.ok : s.st === 'bad' ? RC.bad : RC.muted, align: 'right' });
+      y += RH; d.line(M, y, W - M, y, RC.line, 0.15);
+    }
+    y += 6;
   }
 
   // ----- Avvik meldt siden forrige runde -----
@@ -1512,7 +1609,8 @@ async function buildReport(ins) {
       const v = a.value; let ans = null, tone = null; const pcol = PRIO_COL[itemPrio(a)];
       if (CHOICE_TYPES.includes(it.type) && v) { ans = v; tone = toneFor(it, v); }
       else if (it.type === 'multi' && Array.isArray(v) && v.length) { ans = v.join(', '); tone = 'sel'; }
-      else if (it.type === 'number' && v != null && v !== '') ans = (it.meter && numOf(v) != null ? nbsp(numOf(v)) : String(v).replace('.', ',')) + (it.unit ? ' ' + it.unit.replace('³', '3') : '');   // m³ skrives m3 i PDF: ³ vises ikke i alle PDF-lesere
+      else if (it.type === 'number' && v != null && v !== '') { ans = (it.meter && numOf(v) != null ? nbsp(numOf(v)) : String(v).replace('.', ',')) + (it.unit ? ' ' + it.unit.replace('³', '3') : ''); if (isFlag(it, a)) tone = 'bad'; }   // m³ skrives m3 i PDF: ³ vises ikke i alle PDF-lesere
+      else if (it.type === 'photo' && (a.photos || []).length) ans = ovwVal(it, a);
       else if (it.type === 'date' && v) { ans = fmt(v); if (isFlag(it, a)) tone = 'bad'; }
       else if (it.type === 'text' && v) ans = String(v);
       const label = it.label, pth = thumbsOf(a.photos || []);
@@ -1641,7 +1739,7 @@ function cardDesc(ins, tpl, key, a, act) {
   L.push(`**Sjekkliste:** ${tpl.name}`, `**Sted:** ${ins.site}`, `**Dato:** ${fmt(ins.date)}`);
   if (ins.anl && ANL[ins.anl]) L.push(`**Anlegg:** ${ANL[ins.anl].name}`); else if (ins.annet) L.push('**Anlegg:** Annet');
   if ((ins.where || '').trim()) L.push(`**Hvor:** ${ins.where.trim()}`);
-  L.push(`**Punkt:** ${sec ? sec.title + (sec.repeat ? ' – ' + sec.unit + ' ' + (inst + 1) : '') : ''}${it ? ' › ' + it.label : ''}`);
+  L.push(`**Punkt:** ${sec ? secLabel(sec, ins, inst) : ''}${it ? ' › ' + it.label : ''}`);
   if (val !== '') L.push(`**Svar:** ${val}`);
   if (a.note) L.push(`**Notat:** ${a.note}`);
   L.push(`**Prioritet:** ${act.prio || 'Lav'}`, `**Ansvarlig:** ${act.who || '-'}`, `**Utført av:** ${ins.by}`);
