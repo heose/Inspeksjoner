@@ -119,6 +119,12 @@ check('Tilkobling: Hub, Trello og versjon', await page.locator('#hub-url').input
 await page.locator('#topbar .back').click();
 await page.locator('.gr[data-id="admin"]').click();
 check('Administrator: innholdsfil', await page.locator('[data-act="content-upload"]').count() === 1);
+await page.locator('[data-act="content-download"]').click();
+await page.waitForSelector('#sheet:not([hidden])');
+check('innholdsfil klar til nedlasting', (await txt('#sheet')).includes('content.js') && (await txt('#sheet')).includes('fra Hub'));
+const [dl] = await Promise.all([page.waitForEvent('download'), page.locator('#sheet [data-act="share-file"]').click()]);
+const dlPath = await dl.path();
+check('nedlastet fil er innholdet fra Hub', dl.suggestedFilename() === 'content.js' && fs.readFileSync(dlPath, 'utf8') === src);
 await page.locator('[data-act="links-open"]').click();
 check('lenkesiden åpnes fra Administrator', (await txt('.bar-title')) === 'Del lenker');
 await page.locator('#topbar .back').click();

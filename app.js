@@ -24,7 +24,7 @@ const COUNTED = ['yn', 'ok', 'okm', 'choice', 'multi', 'number', 'photo'];   // 
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-16 å26';
+const APP_VERSION = '2026-11-16 å27';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -726,7 +726,7 @@ function renderSettings(sec) {
       <div class="row-btns"><button class="btn" data-act="force-update">Hent nyeste versjon</button></div>
     </section>`;
   if (sec === 'admin') return `<section class="panel settings"><h3 class="h3">Innhold</h3>
-      <p class="muted small">Innhold (sjekklister og anlegg): ${S.contentAt ? 'hentet fra Hub ' + new Date(S.contentAt).toLocaleDateString('nb-NO') : 'ikke hentet'}. <button class="link" data-act="content-upload">Last opp innholdsfil (administrator)</button></p>
+      <p class="muted small">Innhold (sjekklister og anlegg): ${S.contentAt ? 'hentet fra Hub ' + new Date(S.contentAt).toLocaleDateString('nb-NO') : 'ikke hentet'}. <button class="link" data-act="content-download">Last ned innholdsfil</button> <button class="link" data-act="content-upload">Last opp innholdsfil (administrator)</button></p>
       <h3 class="h3">Lenker og skjema</h3>
       <p class="muted small">Lenkene som deles fra Argus redigeres under Del lenker og skjema.</p>
       <div class="row-btns"><button class="btn" data-act="links-open">Åpne Del lenker og skjema</button></div>
@@ -1212,6 +1212,7 @@ document.addEventListener('click', async e => {
       if (b.dataset.armed) await ibReject(b.dataset.id); else arm(b, 'Trykk igjen for å avvise');
       break;
     case 'content-upload': $('#contentpick').click(); break;
+    case 'content-download': downloadContent(); break;
     case 'export': await exportBackup(); break;
     case 'import': $('#importpick').click(); break;
   }
@@ -2008,6 +2009,16 @@ async function hubBlob(path) {
   return r.blob();
 }
 const fmtWhen = t => new Date(t).toLocaleString('nb-NO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+/* Last ned innholdsfilen (content.js) slik den ligger i Hub nå, så den kan redigeres og lastes opp igjen.
+   Uten nett brukes kopien på enheten. */
+async function downloadContent() {
+  let src = null, at = S.contentAt, fra = 'Hub';
+  if (hubCfg() && navigator.onLine) { try { const r = await hubFetch('GET', '/content'); if (r.src) { src = r.src; at = r.at; } } catch (e) { console.error(e); } }
+  if (!src) { try { src = JSON.parse(localStorage.getItem('insp-content') || 'null')?.src || null; fra = 'denne enheten'; } catch (e) {} }
+  if (!src) { toast('Fant ingen innholdsfil. Koble til Hub først.', 5000); return; }
+  S.ready_file = { file: new File([src], 'content.js', { type: 'text/javascript' }), title: `Innholdsfilen er klar (fra ${fra}${at ? ', lastet opp ' + fmtWhen(at) : ''})` };
+  renderSheet();
+}
 const guessSite = it => {
   if (it.site && SITES.some(x => x.id === it.site)) return it.site;
   const norm = x => ' ' + String(x || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim() + ' ';
