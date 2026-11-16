@@ -55,30 +55,33 @@ await page.waitForSelector('.ovw');
 check('oversikt med to leietakere fra listen', await page.locator('.ovw-row').count() === 2);
 check('leietakernavn i oversikt og overskrift', (await txt('.ovw-row')).includes('Butikk A') && (await txt('#inst-lt\\#1 .sec-h')).includes('Kafé B'));
 check('leietaker uten status viser Ikke startet', (await txt('.ovw-row')).includes('Ikke startet'));
-check('spylepunkter skjult før status er valgt', await page.locator('[data-key="lt#0.foto_for"]').count() === 0);
+check('spylepunkter skjult før status er valgt', await page.locator('#it-lt\\#0\\.antall').count() === 0);
+
+// Bildepunkt (valgfritt) i sentralen
+check('bildeknapp vises', (await txt('#it-sentral\\.foto_sentral [data-act="photo"]')) === 'Ta bilde');
+const before = await txt('#prog');
+await page.evaluate(() => document.querySelector('#it-sentral\\.foto_sentral [data-act="photo"]').click());
+await page.locator('#filepick').setInputFiles(path.join(root, 'icon-512.png'));
+await page.waitForSelector('#it-sentral\\.foto_sentral .thumb');
+check('valgfritt bilde endrer ikke antall punkter', parseInt((await txt('#prog')).split(' av ')[1]) === parseInt(before.split(' av ')[1]));
+check('knappen blir Ta flere bilder', (await txt('#it-sentral\\.foto_sentral [data-act="photo"]')).includes('flere'));
+
+// Temperaturgrense: minst 70 °C ut fra sentralen
+await page.locator('#n-sentral\\.vv_under').fill('66');
+check('for lav temperatur markeres uten ny opptegning', await page.locator('#it-sentral\\.vv_under.is-flag').count() === 1 && (await txt('[data-lim="sentral.vv_under"]')).includes('minst 70'));
+await page.locator('#n-sentral\\.vv_under').fill('75');
+check('markering forsvinner ved 75 °C', await page.locator('#it-sentral\\.vv_under.is-flag').count() === 0);
 
 await page.locator('[data-act="set"][data-key="lt#0.status"][data-val="Spylt"]').click();
-check('bildeknapp vises når status er Spylt', (await txt('#it-lt\\#0\\.foto_for [data-act="photo"]')) === 'Ta bilde');
-const before = await txt('#prog');
-await page.evaluate(() => { const b = document.querySelector('#it-lt\\#0\\.foto_for [data-act="photo"]'); b.click(); });
-await page.locator('#filepick').setInputFiles(path.join(root, 'icon-512.png'));
-await page.waitForSelector('#it-lt\\#0\\.foto_for .thumb');
-const after = await txt('#prog');
-check('bilde teller som besvart', parseInt(after) === parseInt(before) + 1, `${before} -> ${after}`);
-check('knappen blir Ta flere bilder', (await txt('#it-lt\\#0\\.foto_for [data-act="photo"]')).includes('flere'));
-
-await page.locator('#n-lt\\#0\\.t_for').fill('55');
-await page.locator('#n-lt\\#0\\.t_spyl').fill('61');
-check('for lav spyletemperatur markeres uten ny opptegning', await page.locator('#it-lt\\#0\\.t_spyl.is-flag').count() === 1 && (await txt('[data-lim="lt#0.t_spyl"]')).includes('minst 65'));
-await page.locator('#n-lt\\#0\\.t_spyl').fill('72');
-check('markering forsvinner ved 72 °C', await page.locator('#it-lt\\#0\\.t_spyl.is-flag').count() === 0);
-await page.locator('#n-lt\\#0\\.t_spyl').fill('61');
+check('spylepunkter vises når status er Spylt', await page.locator('#it-lt\\#0\\.antall').count() === 1);
+await page.locator('#n-lt\\#0\\.antall').fill('3');
+await page.locator('[data-act="set"][data-key="lt#0.samtidig"][data-val="Nei"]').click();
 
 await page.locator('#t-lt\\#1\\.navn').fill('Kafé Bris');
 check('nytt navn oppdateres i overskrift og oversikt', (await txt('[data-inst="lt#1"]')) === 'Kafé Bris' && (await txt('[data-ovw="lt#1"]')) === 'Kafé Bris');
 await page.locator('[data-act="set"][data-key="lt#1.status"][data-val="Ikke aktuelt"]').click();
 check('Ikke aktuelt gir Ferdig i oversikten', (await txt('.ovw-row[data-p="lt#1"]')).includes('Ferdig'));
-check('avvik vises i oversikten', (await txt('.ovw-row[data-p="lt#0"]')).includes('avvik') && (await txt('.ovw-row[data-p="lt#0"]')).includes('61 °C'));
+check('avvik vises i oversikten', (await txt('.ovw-row[data-p="lt#0"]')).includes('avvik') && (await txt('.ovw-row[data-p="lt#0"]')).includes('3 stk'));
 await page.locator('[data-act="rep-add"][data-sec="lt"]').click();
 await page.locator('#t-lt\\#2\\.navn').fill('Frisør C');
 await page.locator('[data-act="set"][data-key="lt#2.status"][data-val="Ikke tilgang"]').click();
