@@ -17,7 +17,7 @@ const server = http.createServer((req, res) => {
 }).listen(0);
 const base = `http://127.0.0.1:${server.address().port}/`;
 const src = fs.readFileSync(path.join(root, 'hub/maler/legionellaspyling.js'), 'utf8') + `
-const TEMPLATES = [legionella('leg_a', 'Testbygg A', 'a', ['Butikk A', 'Kafé B']),
+const TEMPLATES = [legionella('leg_a', 'Testbygg A', 'a'),
   { id: 'avvik', name: 'Avviksmelding', site: '', hidden: true, sections: [{ id: 'avvik', title: 'Avvik', items: [{ id: 'feil', type: 'avvik', label: 'Beskriv avviket' }] }] }];
 const SITES = [{ id: 'a', tl: 'a', name: 'Testbygg A', short: 'TA', tpls: ['leg_a'] }];
 return { TEMPLATES, TRELLO: { done: 'x', board: 'y', lists: { a: 'la' } }, SITES, ANLEGG: [], LINKS: [] };`;
@@ -52,9 +52,14 @@ await page.goto(base);
 await page.waitForSelector('#tabs:not([hidden])');
 await page.locator('.row-card.due [data-act="new"][data-tpl="leg_a"]').click();
 await page.waitForSelector('.ovw');
-check('oversikt med to leietakere fra listen', await page.locator('.ovw-row').count() === 2);
-check('leietakernavn i oversikt og overskrift', (await txt('.ovw-row')).includes('Butikk A') && (await txt('#inst-lt\\#1 .sec-h')).includes('Kafé B'));
+check('starter med én tom leietaker', await page.locator('.ovw-row').count() === 1 && (await txt('[data-inst="lt#0"]')) === 'Leietaker 1' && await page.locator('#t-lt\\#0\\.navn').inputValue() === '');
 check('leietaker uten status viser Ikke startet', (await txt('.ovw-row')).includes('Ikke startet'));
+await page.locator('.ovw [data-act="rep-add"][data-sec="lt"]').click();
+check('+ i oversikten legger til leietaker 2', await page.locator('.ovw-row').count() === 2 && (await txt('[data-inst="lt#1"]')) === 'Leietaker 2');
+check('markøren står i navnefeltet til ny leietaker', await page.evaluate(() => document.activeElement?.id) === 't-lt#1.navn');
+await page.locator('#t-lt\\#0\\.navn').fill('Butikk A');
+await page.locator('#t-lt\\#1\\.navn').fill('Kafé B');
+check('leietakernavn i oversikt og overskrift', (await txt('.ovw-row')).includes('Butikk A') && (await txt('#inst-lt\\#1 .sec-h')).includes('Kafé B'));
 check('spylepunkter skjult før status er valgt', await page.locator('#it-lt\\#0\\.antall').count() === 0);
 
 // Bildepunkt (valgfritt) i sentralen
@@ -82,7 +87,7 @@ check('nytt navn oppdateres i overskrift og oversikt', (await txt('[data-inst="l
 await page.locator('[data-act="set"][data-key="lt#1.status"][data-val="Ikke aktuelt"]').click();
 check('Ikke aktuelt gir Ferdig i oversikten', (await txt('.ovw-row[data-p="lt#1"]')).includes('Ferdig'));
 check('avvik vises i oversikten', (await txt('.ovw-row[data-p="lt#0"]')).includes('avvik') && (await txt('.ovw-row[data-p="lt#0"]')).includes('3 stk'));
-await page.locator('[data-act="rep-add"][data-sec="lt"]').click();
+await page.locator('.sec ~ [data-act="rep-add"][data-sec="lt"]').click();
 await page.locator('#t-lt\\#2\\.navn').fill('Frisør C');
 await page.locator('[data-act="set"][data-key="lt#2.status"][data-val="Ikke tilgang"]').click();
 check('tre leietakere i oversikten', await page.locator('.ovw-row').count() === 3);
@@ -99,14 +104,14 @@ if (shots) { const b64 = await page.evaluate(async () => { const ins = Object.va
 await page.evaluate(() => { const b = document.querySelector('[data-act="close-sheet"]'); if (b) b.click(); });
 await page.locator('#topbar .back').click();
 
-// Neste runde starter med samme leietakere som forrige
+// Neste runde starter tom: leietakere er aldri forhåndsdefinert
 await page.locator('#tabs .tab[data-id="sites"]').click();
 await page.locator('.sitebtn[data-id="a"]').click();
 await page.locator('.tpl[data-tpl="leg_a"]').click();
 await page.waitForSelector('.ovw');
 const names = await page.locator('.ovw-name').allInnerTexts();
-check('ny runde har leietakerne fra forrige runde', names.join('|') === 'Butikk A|Kafé Bris|Frisør C', names.join('|'));
-check('ny runde har ingen svar', (await txt('.ovw')).includes('0 av 3 ferdig'));
+check('ny runde starter med én tom leietaker (ingen fra forrige runde)', names.join('|') === 'Leietaker 1', names.join('|'));
+check('ny runde har ingen svar', (await txt('.ovw')).includes('0 av 1 ferdig'));
 
 check('ingen JavaScript-feil', errors.length === 0, errors.join(' | '));
 await browser.close(); server.close();

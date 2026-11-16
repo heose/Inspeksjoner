@@ -1,17 +1,17 @@
 /* Sjekkliste: Legionellaspyling av tappevann (fjernvarme med legionellaknapp, f.eks. Skagerak Varme).
    Lim funksjonen inn i content.js (innholdsfilen i Hub), og legg til én mal per bygg i TEMPLATES, f.eks.:
 
-     legionella('leg_op', 'Bygg A', 'op', ['Butikk A', 'Kafé B', 'Kontor 2. etg', 'Felles garderobe'])
+     legionella('leg_op', 'Bygg A', 'op')
 
    og legg id-en ('leg_op') i tpls for bygget i SITES. Last opp content.js i Argus (Mer → Administrator).
 
-   Leietakerlisten er bare utgangspunktet første gang. Senere runder starter med samme leietakere som forrige
-   fullførte runde. Leietakere kan legges til nederst i skjemaet, og «Ikke aktuelt» brukes for de som ikke har tappepunkter.
+   Ingen leietakere er forhåndsdefinert. Hver runde starter med én tom leietaker, og flere legges til med
+   «+ Legg til leietaker» (i leietakeroversikten og nederst i skjemaet).
 
    Grenser og råd bygger på brevet fra fjernvarmeleverandøren (75 °C, 10 min per tappepunkt, bypass over blandeventil,
    ikke for mange tappepunkt samtidig) og Helsedirektoratets legionellaveileder (minst 70 °C ved sjokkoppvarming).
    Punktene er gjennomgått og redigert i regnearket «Legionellaspyling sjekkpunkter». */
-const legionella = (id, site, tl, leietakere = []) => ({
+const legionella = (id, site, tl) => ({
   id, name: 'Legionellaspyling ' + site, site, months: 6, tl,
   sections: [
     { id: 'forb', title: 'Før spyledagen', items: [
@@ -30,7 +30,7 @@ const legionella = (id, site, tl, leietakere = []) => ({
       { id: 'vv_under', type: 'number', label: 'Varmtvann ut fra sentralen etter aktivering', unit: '°C', min: 70 },
       { id: 'vvc', type: 'number', label: 'Temperatur på VVC-retur (sirkulasjon) under spyling', unit: '°C', min: 60, opt: true, help: 'Hvis måler finnes. Under 60 °C tyder på at deler av nettet ikke blir varmt nok.' },
     ] },
-    { id: 'lt', title: 'Leietaker', repeat: true, unit: 'Leietaker', nameItem: 'navn', names: leietakere,
+    { id: 'lt', title: 'Leietaker', repeat: true, unit: 'Leietaker', nameItem: 'navn',
       overview: ['status', 'antall'], overviewTitle: 'Leietakeroversikt', items: [
       { id: 'tid', type: 'info', label: 'Hvert tappepunkt tappes med fullt varmt vann (varmest) i minst 10 minutter', showIf: { item: 'status', eq: 'Spylt' } },
       { id: 'navn', type: 'text', label: 'Leietaker / lokale' },

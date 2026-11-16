@@ -24,7 +24,7 @@ const COUNTED = ['yn', 'ok', 'okm', 'choice', 'multi', 'number', 'photo'];   // 
 /* ---------- Hjelpere ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const APP_VERSION = '2026-11-16 å25';
+const APP_VERSION = '2026-11-16 å27';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const todayISO = () => iso(new Date());
@@ -520,13 +520,6 @@ function newInspection(tid) {
     const k = prefixOf(sec, 0) + '.' + it.id, v = prev.answers[k]?.value;
     if (v) ins.answers[k] = { value: v };
   }
-  // Gjentatte deler med navn (leietakere): samme liste som forrige runde, ellers listen i sjekklisten (sec.names)
-  for (const sec of t.sections) if (sec.repeat && sec.nameItem) {
-    const names = prev ? Array.from({ length: instCount(sec, prev) }, (_, i) => prev.answers[prefixOf(sec, i) + '.' + sec.nameItem]?.value || '') : (sec.names || []);
-    if (!names.some(Boolean)) continue;
-    ins.repeats[sec.id] = names.length;
-    names.forEach((v, i) => { if (v) ins.answers[prefixOf(sec, i) + '.' + sec.nameItem] = { value: v }; });
-  }
   S.ins[ins.id] = ins; flush(ins.id);
   openIns(ins.id);
 }
@@ -733,7 +726,7 @@ function renderSettings(sec) {
       <div class="row-btns"><button class="btn" data-act="force-update">Hent nyeste versjon</button></div>
     </section>`;
   if (sec === 'admin') return `<section class="panel settings"><h3 class="h3">Innhold</h3>
-      <p class="muted small">Innhold (sjekklister og anlegg): ${S.contentAt ? 'hentet fra Hub ' + new Date(S.contentAt).toLocaleDateString('nb-NO') : 'ikke hentet'}. <button class="link" data-act="content-upload">Last opp innholdsfil (administrator)</button></p>
+      <p class="muted small">Innhold (sjekklister og anlegg): ${S.contentAt ? 'hentet fra Hub ' + new Date(S.contentAt).toLocaleDateString('nb-NO') : 'ikke hentet'}. <button class="link" data-act="content-download">Last ned innholdsfil</button> <button class="link" data-act="content-upload">Last opp innholdsfil (administrator)</button></p>
       <h3 class="h3">Lenker og skjema</h3>
       <p class="muted small">Lenkene som deles fra Argus redigeres under Del lenker og skjema.</p>
       <div class="row-btns"><button class="btn" data-act="links-open">Åpne Del lenker og skjema</button></div>
@@ -935,7 +928,7 @@ function overviewHTML(ins, sec) {
     const lab = s.st === 'ok' ? 'Ferdig' : s.st === 'bad' ? (s.flags === 1 ? '1 avvik' : s.flags + ' avvik') : s.done ? `${s.done} av ${s.total}` : 'Ikke startet';
     rows.push(`<button type="button" class="ovw-row" data-act="ovw-go" data-p="${esc(s.p)}"><span class="dot ${s.st === 'ok' ? 'ok' : s.st === 'bad' ? 'bad' : s.st === 'warn' ? 'warn' : 'na'}"></span><span class="ovw-main"><span class="ovw-name" data-ovw="${esc(s.p)}">${esc(instName(sec, ins, i))}</span>${vals ? `<span class="ovw-vals">${vals}</span>` : ''}</span><span class="pill ${s.st === 'ok' ? 'ok' : s.st === 'bad' ? 'bad' : s.st === 'warn' ? 'warn' : 'na'}">${lab}</span></button>`);
   }
-  return `<section class="panel ovw"><h2 class="h3">${esc(sec.overviewTitle || sec.unit + 'oversikt')}</h2><p class="muted small">${ferdig} av ${n} ferdig${avvik ? ` · <span class="t-bad">${avvik} med avvik</span>` : ''}. Trykk på en rad for å gå dit.</p><div class="ovw-list">${rows.join('')}</div></section>`;
+  return `<section class="panel ovw"><h2 class="h3">${esc(sec.overviewTitle || sec.unit + 'oversikt')}</h2><p class="muted small">${ferdig} av ${n} ferdig${avvik ? ` · <span class="t-bad">${avvik} med avvik</span>` : ''}. Trykk på en rad for å gå dit.</p><div class="ovw-list">${rows.join('')}</div><button class="add-rep" data-act="rep-add" data-sec="${sec.id}">+ Legg til ${esc(sec.unit.toLowerCase())}</button></section>`;
 }
 
 /* Fremdrift øverst og fast linje nederst mens en runde pågår. Ikke for avviksmelding eller fullførte. */
@@ -1152,7 +1145,15 @@ document.addEventListener('click', async e => {
       if (!b.dataset.armed) { arm(b, 'Trykk igjen for å slette'); break; }
       { const a = A(ins, key); a.actions = (a.actions || []).filter(x => x.id !== b.dataset.aid); touch(ins); render(); }
       break;
-    case 'rep-add': ins.repeats[b.dataset.sec] = instCount(TPL[ins.templateId].sections.find(s => s.id === b.dataset.sec), ins) + 1; touch(ins); render(); break;
+    case 'rep-add': {
+      const sec = TPL[ins.templateId].sections.find(s => s.id === b.dataset.sec), n = instCount(sec, ins) + 1;
+      ins.repeats[sec.id] = n; touch(ins); render();
+      // Ny del (f.eks. leietaker): gå dit og sett markøren i navnefeltet
+      const p = prefixOf(sec, n - 1), el = document.getElementById('inst-' + p);
+      if (el) el.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      if (sec.nameItem) document.getElementById('t-' + p + '.' + sec.nameItem)?.focus({ preventScroll: true });
+      break;
+    }
     case 'rep-del': {
       if (!b.dataset.armed) { arm(b, 'Bekreft fjerning'); break; }
       const sec = TPL[ins.templateId].sections.find(s => s.id === b.dataset.sec); const n = instCount(sec, ins);
@@ -1211,6 +1212,7 @@ document.addEventListener('click', async e => {
       if (b.dataset.armed) await ibReject(b.dataset.id); else arm(b, 'Trykk igjen for å avvise');
       break;
     case 'content-upload': $('#contentpick').click(); break;
+    case 'content-download': downloadContent(); break;
     case 'export': await exportBackup(); break;
     case 'import': $('#importpick').click(); break;
   }
@@ -2007,6 +2009,16 @@ async function hubBlob(path) {
   return r.blob();
 }
 const fmtWhen = t => new Date(t).toLocaleString('nb-NO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+/* Last ned innholdsfilen (content.js) slik den ligger i Hub nå, så den kan redigeres og lastes opp igjen.
+   Uten nett brukes kopien på enheten. */
+async function downloadContent() {
+  let src = null, at = S.contentAt, fra = 'Hub';
+  if (hubCfg() && navigator.onLine) { try { const r = await hubFetch('GET', '/content'); if (r.src) { src = r.src; at = r.at; } } catch (e) { console.error(e); } }
+  if (!src) { try { src = JSON.parse(localStorage.getItem('insp-content') || 'null')?.src || null; fra = 'denne enheten'; } catch (e) {} }
+  if (!src) { toast('Fant ingen innholdsfil. Koble til Hub først.', 5000); return; }
+  S.ready_file = { file: new File([src], 'content.js', { type: 'text/javascript' }), title: `Innholdsfilen er klar (fra ${fra}${at ? ', lastet opp ' + fmtWhen(at) : ''})` };
+  renderSheet();
+}
 const guessSite = it => {
   if (it.site && SITES.some(x => x.id === it.site)) return it.site;
   const norm = x => ' ' + String(x || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim() + ' ';
